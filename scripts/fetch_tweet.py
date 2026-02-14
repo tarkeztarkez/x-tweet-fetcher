@@ -106,8 +106,19 @@ def main():
     parser.add_argument("--url", "-u", required=True, help="Tweet URL (x.com or twitter.com)")
     parser.add_argument("--pretty", "-p", action="store_true", help="Pretty print JSON")
     parser.add_argument("--text-only", "-t", action="store_true", help="Print only tweet text (or article full text)")
+    parser.add_argument("--replies", "-r", action="store_true", help="Fetch tweet replies/comments (requires browser automation - not yet implemented)")
 
     args = parser.parse_args()
+
+    if args.replies:
+        print(json.dumps({
+            "error": "Reply fetching not currently supported",
+            "reason": "FxTwitter API does not provide reply content. Reply fetching would require browser automation dependencies (Camofox/Nitter) which were removed to maintain zero-dependency architecture.",
+            "workaround": "The tweet's reply count is included in the standard output as 'replies_count'",
+            "future": "This feature may be re-implemented as an optional dependency in a future version"
+        }, indent=2 if args.pretty else None), file=sys.stderr)
+        sys.exit(1)
+
     result = fetch_tweet(args.url)
 
     if args.text_only:

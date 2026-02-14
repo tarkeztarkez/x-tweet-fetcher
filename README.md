@@ -38,7 +38,9 @@ Uses [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API to fetch tweet d
 
 ## Limitations
 
-- Cannot fetch reply threads
+- Cannot fetch reply threads (only reply counts are included)
+  - Reply content requires browser automation (removed to maintain zero dependencies)
+  - `--replies` flag documented but returns explanatory error
 - Cannot fetch deleted or private tweets
 - Depends on FxTwitter service availability
 

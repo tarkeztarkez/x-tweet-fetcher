@@ -95,7 +95,10 @@ Uses [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API (`api.fxtwitter.
 
 ## Limitations
 
-- Cannot fetch reply threads (X API required)
+- Cannot fetch reply threads (only reply counts available via `replies_count` field)
+  - Reply content would require browser automation dependencies (Camofox/Nitter)
+  - These were removed to maintain zero-dependency architecture
+  - `--replies` flag exists but returns an explanatory error message
 - Cannot fetch deleted or private tweets
 - Rate limits depend on FxTwitter service availability
 - If FxTwitter goes down, the skill won't work (no fallback)
