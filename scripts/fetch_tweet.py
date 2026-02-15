@@ -34,6 +34,56 @@ def parse_tweet_url(url: str) -> tuple:
     raise ValueError(f"Cannot parse tweet URL: {url}")
 
 
+def extract_media(tweet_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract media information (photos/videos) from tweet object."""
+    media_data = {}
+
+    # Extract photos
+    photos = tweet_obj.get("photos")
+    if photos and isinstance(photos, list) and len(photos) > 0:
+        media_data["images"] = []
+        for photo in photos:
+            image_info = {"url": photo.get("url", "")}
+            if photo.get("width"):
+                image_info["width"] = photo.get("width")
+            if photo.get("height"):
+                image_info["height"] = photo.get("height")
+            media_data["images"].append(image_info)
+
+    # Extract videos
+    videos = tweet_obj.get("videos")
+    if videos and isinstance(videos, list) and len(videos) > 0:
+        media_data["videos"] = []
+        for video in videos:
+            video_info = {}
+            # Get highest quality video URL
+            if video.get("url"):
+                video_info["url"] = video.get("url")
+            # Duration in seconds
+            if video.get("duration"):
+                video_info["duration"] = video.get("duration")
+            # Thumbnail
+            if video.get("thumbnail_url"):
+                video_info["thumbnail"] = video.get("thumbnail_url")
+            # Available variants/bitrates
+            if video.get("variants") and isinstance(video.get("variants"), list):
+                video_info["variants"] = []
+                for variant in video.get("variants", []):
+                    variant_info = {}
+                    if variant.get("url"):
+                        variant_info["url"] = variant.get("url")
+                    if variant.get("bitrate"):
+                        variant_info["bitrate"] = variant.get("bitrate")
+                    if variant.get("content_type"):
+                        variant_info["content_type"] = variant.get("content_type")
+                    if variant_info:
+                        video_info["variants"].append(variant_info)
+            if video_info:
+                media_data["videos"].append(video_info)
+
+    return media_data if media_data else None
+
+
 def fetch_tweet(url: str, timeout: int = 30) -> Dict[str, Any]:
     """Fetch tweet text, stats, quotes, and full article content via FxTwitter API."""
     username, tweet_id = parse_tweet_url(url)
@@ -68,6 +118,11 @@ def fetch_tweet(url: str, timeout: int = 30) -> Dict[str, Any]:
                 "lang": tweet.get("lang", ""),
             }
 
+            # Extract media if present
+            media = extract_media(tweet)
+            if media:
+                tweet_data["media"] = media
+
             # Include quote tweet if present
             if tweet.get("quote"):
                 qt = tweet["quote"]
@@ -79,6 +134,10 @@ def fetch_tweet(url: str, timeout: int = 30) -> Dict[str, Any]:
                     "retweets": qt.get("retweets", 0),
                     "views": qt.get("views", 0),
                 }
+                # Extract media from quote tweet
+                quote_media = extract_media(qt)
+                if quote_media:
+                    tweet_data["quote"]["media"] = quote_media
 
             # Extract X Article (long-form content) if present
             article = tweet.get("article")
