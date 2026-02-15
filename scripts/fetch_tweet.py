@@ -38,20 +38,25 @@ def extract_media(tweet_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Extract media information (photos/videos) from tweet object."""
     media_data = {}
 
-    # Extract photos
-    photos = tweet_obj.get("photos")
-    if photos and isinstance(photos, list) and len(photos) > 0:
-        media_data["images"] = []
-        for photo in photos:
-            image_info = {"url": photo.get("url", "")}
-            if photo.get("width"):
-                image_info["width"] = photo.get("width")
-            if photo.get("height"):
-                image_info["height"] = photo.get("height")
-            media_data["images"].append(image_info)
+    # Get the media object from the tweet
+    media = tweet_obj.get("media", {})
 
-    # Extract videos
-    videos = tweet_obj.get("videos")
+    # Extract photos from media.all where type == 'photo'
+    all_media = media.get("all", [])
+    if all_media and isinstance(all_media, list):
+        photos = [item for item in all_media if item.get("type") == "photo"]
+        if photos:
+            media_data["images"] = []
+            for photo in photos:
+                image_info = {"url": photo.get("url", "")}
+                if photo.get("width"):
+                    image_info["width"] = photo.get("width")
+                if photo.get("height"):
+                    image_info["height"] = photo.get("height")
+                media_data["images"].append(image_info)
+
+    # Extract videos from media.videos
+    videos = media.get("videos", [])
     if videos and isinstance(videos, list) and len(videos) > 0:
         media_data["videos"] = []
         for video in videos:
