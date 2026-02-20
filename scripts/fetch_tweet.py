@@ -617,6 +617,7 @@ def parse_replies_snapshot(snapshot: str, original_author: str) -> List[Dict]:
             views = 0
             media_urls = []
             links = []  # 新增：提取评论中的链接
+            thread_replies = []  # 新增：嵌套回复
             stats_set = False
 
             # Scan backwards for author info (within ~15 lines)
@@ -707,8 +708,56 @@ def parse_replies_snapshot(snapshot: str, original_author: str) -> List[Dict]:
                             if decoded_url not in links:
                                 links.append(decoded_url)
 
-                # Stop at next "Replying to" block
+                # Stop at next "Replying to" block - but collect nested replies first
                 if fwd == "- text: Replying to":
+                    # Continue scanning for nested replies within this thread
+                    # Skip the @original line and continue parsing nested content
+                    nested_reply_text = None
+                    nested_time_ago = None
+                    nested_likes = 0
+                    nested_replies_count = 0
+                    nested_views = 0
+                    
+                    for k in range(j + 1, min(n, j + 15)):
+                        nested_line = lines[k].strip()
+                        
+                        # Skip @handle lines
+                        if re.match(r'^- link "@\w+"\s*(\[e\d+\])?:?$', nested_line):
+                            continue
+                            
+                        # Check for timestamp
+                        if not nested_time_ago:
+                            m = re.match(r'^- link "(\d+[smhd])"\s*(\[e\d+\])?:?$', nested_line)
+                            if m:
+                                nested_time_ago = m.group(1)
+                        
+                        # Parse nested reply text
+                        if nested_line.startswith("- text:"):
+                            raw = nested_line[len("- text:"):].strip()
+                            if raw:
+                                text_part, rc, rt, lk, vw = _parse_stats_from_text(raw)
+                                if text_part and not nested_reply_text:
+                                    skip_labels = {"replying to", ""}
+                                    if text_part.strip().lower() not in skip_labels:
+                                        nested_reply_text = text_part.strip()
+                                        nested_likes = lk
+                                        nested_replies_count = rc
+                                        nested_views = vw
+                        
+                        # Stop at next "Replying to" block
+                        if nested_line == "- text: Replying to":
+                            break
+                    
+                    if nested_reply_text:
+                        thread_replies.append({
+                            "text": nested_reply_text,
+                            "time_ago": nested_time_ago,
+                            "likes": nested_likes,
+                            "replies": nested_replies_count,
+                            "views": nested_views
+                        })
+                    
+                    # Now break for the main loop
                     break
 
             if author_handle and reply_text:
@@ -725,6 +774,8 @@ def parse_replies_snapshot(snapshot: str, original_author: str) -> List[Dict]:
                     reply["media"] = media_urls
                 if links:
                     reply["links"] = links
+                if thread_replies:
+                    reply["thread_replies"] = thread_replies
 
                 # Deduplicate
                 if not any(
