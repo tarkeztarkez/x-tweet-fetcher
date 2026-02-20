@@ -696,7 +696,7 @@ def parse_replies_snapshot(snapshot: str, original_author: str) -> List[Dict]:
                         if media_url not in media_urls:
                             media_urls.append(media_url)
 
-                # Link URL line (new: extract links from comments)
+                # Link URL line: extract from /url: lines following any link element
                 link_url_match = re.match(r'^- /url:\s+(.+)$', fwd)
                 if link_url_match:
                     url_part = link_url_match.group(1).strip()
@@ -707,6 +707,15 @@ def parse_replies_snapshot(snapshot: str, original_author: str) -> List[Dict]:
                         if decoded_url.startswith("http"):
                             if decoded_url not in links:
                                 links.append(decoded_url)
+
+                # Named link where the link text itself is a URL:
+                # e.g. - link "https://github.com/some/repo":
+                named_link_match = re.match(r'^- link "([^"]+)"\s*(\[e\d+\])?:?$', fwd)
+                if named_link_match:
+                    link_text = named_link_match.group(1).strip()
+                    if link_text.startswith("http"):
+                        if link_text not in links:
+                            links.append(link_text)
 
                 # Stop at next "Replying to" block - but collect nested replies first
                 if fwd == "- text: Replying to":
