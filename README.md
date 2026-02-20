@@ -6,6 +6,7 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies, ze
 
 ## What It Can Fetch
 
+### X/Twitter
 | Content | Support | Requirement |
 |---------|---------|-------------|
 | Regular tweets | ✅ Full text + stats | None |
@@ -15,6 +16,14 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies, ze
 | Stats (likes/RT/views) | ✅ Included | None |
 | **Reply comments** | ⚠️ With comments | **Camofox required** |
 | **User timeline** | ⚠️ With timeline | **Camofox required** |
+
+### China Platforms (NEW)
+| Platform | Content | Requirement |
+|----------|---------|-------------|
+| **微博 Weibo** | ✅ Posts, comments, stats | Camofox |
+| **B站 Bilibili** | ✅ Video info, UP, views, likes | Camofox |
+| **CSDN** | ✅ Articles, code blocks, stats | Camofox |
+| **微信公众号 WeChat** | ✅ Full articles, images | None (direct HTTP) |
 
 ## Quick Start
 
@@ -80,10 +89,45 @@ export CAMOFOX_API_KEY="your-secret-key"
 openclaw start
 ```
 
+## China Platform Fetcher
+
+Fetch content from Chinese platforms with automatic platform detection.
+
+```bash
+# Weibo post
+python3 scripts/fetch_china.py --url "https://weibo.com/user/post" --pretty
+
+# Bilibili video
+python3 scripts/fetch_china.py --url "https://www.bilibili.com/video/BVxxxxxx" --pretty
+
+# CSDN article
+python3 scripts/fetch_china.py --url "https://blog.csdn.net/user/article/details/xxx" --pretty
+
+# WeChat article (no Camofox needed!)
+python3 scripts/fetch_china.py --url "https://mp.weixin.qq.com/s/xxxxx" --pretty
+
+# Markdown output with YAML frontmatter
+python3 scripts/fetch_china.py --url "<URL>" --markdown
+
+# Human readable text
+python3 scripts/fetch_china.py --url "<URL>" --text-only
+
+# English output
+python3 scripts/fetch_china.py --url "<URL>" --lang en
+```
+
+### Supported Output Formats
+
+- **JSON** (default): Structured data with stats, media, metadata
+- **Markdown** (`--markdown`): Clean markdown with YAML frontmatter
+- **Text** (`--text-only`): Human-readable plain text
+
 ## Limitations
 
 - Cannot fetch deleted or private tweets
 - Depends on FxTwitter / Camofox service availability
+- China platforms: Comments may require login (graceful degradation)
+- WeChat: Only works with valid article links (not expired short links)
 
 ## License
 
