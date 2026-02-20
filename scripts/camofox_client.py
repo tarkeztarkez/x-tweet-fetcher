@@ -80,3 +80,91 @@ def camofox_fetch_page(url: str, session_key: str, wait: float = 8, port: int = 
     snapshot = camofox_snapshot(tab_id, port)
     camofox_close_tab(tab_id, port)
     return snapshot
+
+
+import re
+import urllib.parse
+
+
+def camofox_search(query: str, num: int = 10, lang: str = "zh-CN", port: int = 9377) -> list:
+    """
+    Search Google via Camofox. Returns list of dicts:
+    [{"title": ..., "url": ..., "snippet": ...}, ...]
+    """
+    encoded = urllib.parse.quote(query)
+    search_url = f"https://www.google.com/search?q={encoded}&hl={lang}&num={num}"
+    snapshot = camofox_fetch_page(search_url, f"search-{int(time.time())}", wait=4, port=port)
+    if not snapshot:
+        return []
+    return _parse_google_results(snapshot)
+
+
+def _parse_google_results(snapshot: str) -> list:
+    """Parse Google search results from Camofox snapshot text."""
+    results = []
+    lines = snapshot.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # Look for search result links with heading inside
+        # Pattern: - link "Title ... site https://..." [eNN]:
+        #            - /url: https://actual-url
+        #            - heading "Title" [level=3]
+        #            - text: site description
+        #          - text: snippet...
+        if '- heading "' in line and '[level=3]' in line:
+            # Extract title
+            m = re.search(r'heading "(.+?)"', line)
+            title = m.group(1) if m else ""
+            
+            # Look backwards for the URL
+            url = ""
+            for j in range(max(0, i - 3), i):
+                if "/url:" in lines[j]:
+                    url = lines[j].strip().split("/url:", 1)[1].strip()
+                    break
+            
+            # Look forward for snippet text
+            snippet_parts = []
+            k = i + 1
+            # Skip the "text: site description" line right after heading
+            if k < len(lines) and "text:" in lines[k] and ("https://" in lines[k] or "http://" in lines[k]):
+                k += 1
+            # Collect snippet lines until next link/heading
+            while k < len(lines):
+                sline = lines[k].strip()
+                if sline.startswith("- link ") or sline.startswith("- heading "):
+                    break
+                if sline.startswith("- text:"):
+                    snippet_parts.append(sline.split("- text:", 1)[1].strip())
+                elif sline.startswith("- emphasis:"):
+                    snippet_parts.append(sline.split("- emphasis:", 1)[1].strip())
+                elif sline.startswith("text:"):
+                    snippet_parts.append(sline.split("text:", 1)[1].strip())
+                elif sline.startswith("emphasis:"):
+                    snippet_parts.append(sline.split("emphasis:", 1)[1].strip())
+                k += 1
+            
+            snippet = " ".join(snippet_parts).strip()
+            
+            # Filter out non-result entries
+            if url and title and not url.startswith("/search") and "google.com" not in url:
+                results.append({
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet,
+                })
+        i += 1
+    return results
+
+
+if __name__ == "__main__":
+    # Quick test
+    import sys
+    query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "好莱坞 故事 5个模型"
+    print(f"Searching: {query}")
+    results = camofox_search(query)
+    for i, r in enumerate(results, 1):
+        print(f"\n{i}. {r['title']}")
+        print(f"   {r['url']}")
+        print(f"   {r['snippet'][:100]}...")
