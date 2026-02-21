@@ -6,6 +6,12 @@ Modes:
   --url <URL>              Fetch single tweet via FxTwitter (zero deps)
   --url <URL> --replies    Fetch tweet + replies via Camofox + Nitter
   --user <username>        Fetch user timeline via Camofox + Nitter
+  --article <URL_or_ID>    Fetch X Article (long-form) full text via Camofox
+
+Note on --article mode:
+  X Articles (x.com/i/article/...) require X login to view the full content.
+  Without login, Camofox will capture whatever is publicly visible (title +
+  partial preview). This is an X platform limitation, not a tool limitation.
 """
 
 import json
@@ -61,6 +67,20 @@ _MESSAGES = {
         "article_stats": "点赞: {likes} | 转推: {retweets} | 浏览: {views}",
         "article_words": "字数: {word_count}",
         "tweet_stats": "\n点赞: {likes} | 转推: {retweets} | 浏览: {views}",
+        # article mode
+        "opening_article_via_camofox": "[x-tweet-fetcher] 正在通过 Camofox 打开 X Article {url} ...",
+        "err_camofox_not_running_article": (
+            "Camofox 未在 localhost:{port} 运行。"
+            "使用 --article 前请先启动 Camofox。"
+            "参考: https://github.com/openclaw/camofox"
+        ),
+        "err_invalid_article": "无法解析 Article URL 或 ID: {input}",
+        "article_header": "X Article: {title}",
+        "article_content_label": "正文",
+        "article_login_note": (
+            "注意：X Article 需要登录才能查看完整内容。"
+            "未登录时 Camofox 只能抓到公开部分（标题+摘要）。"
+        ),
         # FxTwitter network error
         "err_network": "网络错误：重试后仍无法获取推文",
         "err_unexpected": "获取推文时发生意外错误",
@@ -99,6 +119,20 @@ _MESSAGES = {
         "article_stats": "Likes: {likes} | Retweets: {retweets} | Views: {views}",
         "article_words": "Words: {word_count}",
         "tweet_stats": "\nLikes: {likes} | Retweets: {retweets} | Views: {views}",
+        # article mode
+        "opening_article_via_camofox": "[x-tweet-fetcher] Opening X Article {url} via Camofox...",
+        "err_camofox_not_running_article": (
+            "Camofox is not running on localhost:{port}. "
+            "Please start Camofox before using --article. "
+            "See: https://github.com/openclaw/camofox"
+        ),
+        "err_invalid_article": "Cannot parse Article URL or ID: {input}",
+        "article_header": "X Article: {title}",
+        "article_content_label": "Content",
+        "article_login_note": (
+            "Note: X Articles require login to view full content. "
+            "Without login, Camofox can only capture the public portion (title + preview)."
+        ),
         "err_network": "Network error: Failed to fetch tweet after retry",
         "err_unexpected": "An unexpected error occurred while fetching the tweet",
     },
@@ -992,6 +1026,228 @@ def fetch_tweet_replies(
 
 
 # ---------------------------------------------------------------------------
+# X Article helpers
+# ---------------------------------------------------------------------------
+
+def parse_article_id(input_str: str) -> Optional[str]:
+    """Extract article ID from a URL or raw ID string.
+
+    Accepts:
+      - Pure numeric ID:           "2011779830157557760"
+      - Article URL:               "https://x.com/i/article/2011779830157557760"
+      - Article URL (no scheme):   "x.com/i/article/2011779830157557760"
+      - Tweet URL whose text links to an article (pass the ID directly in that case)
+
+    Returns the article ID string, or None if unparseable.
+    """
+    input_str = input_str.strip()
+
+    # Pure numeric ID
+    if re.match(r'^\d{10,25}$', input_str):
+        return input_str
+
+    # URL containing /i/article/<id>
+    m = re.search(r'/i/article/(\d{10,25})', input_str)
+    if m:
+        return m.group(1)
+
+    return None
+
+
+def parse_article_snapshot(snapshot: str) -> Dict[str, Any]:
+    """Parse an X Article page snapshot (Camofox aria snapshot) into structured data.
+
+    X Article accessibility tree structure (observed):
+      - heading "Article title"          ← article title
+      - text: @AuthorHandle              ← author handle
+      - text: Author Name                ← author display name
+      - text: <date>                     ← publish date
+      - text: paragraph 1
+      - text: paragraph 2
+      ...
+
+    Because X requires login for full content, the snapshot may only contain
+    title + preview/teaser. We capture whatever is available.
+
+    Returns a dict with keys:
+      title, author, author_handle, paragraphs, content, word_count, char_count,
+      is_partial (True when content is likely truncated due to login wall)
+    """
+    lines = snapshot.split("\n")
+    title: Optional[str] = None
+    author_handle: Optional[str] = None
+    author_name: Optional[str] = None
+    paragraphs: List[str] = []
+
+    # Patterns
+    heading_re = re.compile(r'^-\s+heading\s+"(.+)"', re.IGNORECASE)
+    text_re = re.compile(r'^-\s+text:\s+(.*)')
+    link_re = re.compile(r'^-\s+link\s+"([^"]+)"')
+    handle_re = re.compile(r'^@(\w+)$')
+
+    # Strings to skip (navigation / boilerplate / empty)
+    _SKIP_TEXTS = {
+        "", "x", "home", "explore", "notifications", "messages", "grok",
+        "profile", "more", "post", "log in", "sign up", "sign in",
+        "already have an account?", "don't have an account?",
+        "subscribe", "get the app", "help", "settings", "privacy policy",
+        "terms of service", "cookie policy", "accessibility",
+        "ads info", "more options", "follow", "following",
+    }
+
+    def _is_skip(text: str) -> bool:
+        stripped = text.strip().lower()
+        return stripped in _SKIP_TEXTS or len(stripped) < 2
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+
+        # ── Heading → title ────────────────────────────────────────────────
+        m = heading_re.match(line)
+        if m and not title:
+            candidate = m.group(1).strip()
+            if not _is_skip(candidate):
+                title = candidate
+            i += 1
+            continue
+
+        # ── text: lines ────────────────────────────────────────────────────
+        m = text_re.match(line)
+        if m:
+            raw = m.group(1).strip()
+
+            # Author @handle
+            hm = handle_re.match(raw)
+            if hm and not author_handle:
+                author_handle = raw  # keep with @
+                i += 1
+                continue
+
+            # Skip boilerplate
+            if _is_skip(raw):
+                i += 1
+                continue
+
+            # Skip short date-like strings immediately after author info
+            # (e.g. "Feb 10, 2025") — we don't extract date for now, just skip
+            if re.match(r'^[A-Z][a-z]{2}\s+\d{1,2},?\s+\d{4}$', raw):
+                i += 1
+                continue
+
+            # Author display name heuristic: single line, no spaces (but allow
+            # names like "John Doe"), appears early before paragraphs, not a sentence
+            if not author_name and not paragraphs and len(raw.split()) <= 4 and not raw.endswith("."):
+                author_name = raw
+                i += 1
+                continue
+
+            # Everything else is paragraph content
+            paragraphs.append(raw)
+            i += 1
+            continue
+
+        # ── Named links can sometimes be author name or article sub-heading ─
+        m = link_re.match(line)
+        if m:
+            text = m.group(1).strip()
+            hm = handle_re.match(text)
+            if hm and not author_handle:
+                author_handle = text
+            elif not _is_skip(text) and not author_name and not paragraphs:
+                author_name = text
+            i += 1
+            continue
+
+        i += 1
+
+    content = "\n\n".join(paragraphs)
+    word_count = len(content.split()) if content else 0
+    char_count = len(content)
+
+    # Heuristic: if content is very short (< 100 chars), likely login wall
+    is_partial = char_count < 100
+
+    return {
+        "title": title or "",
+        "author": author_name or "",
+        "author_handle": author_handle or "",
+        "paragraphs": paragraphs,
+        "content": content,
+        "word_count": word_count,
+        "char_count": char_count,
+        "is_partial": is_partial,
+    }
+
+
+def fetch_article(
+    input_str: str,
+    camofox_port: int = 9377,
+) -> Dict[str, Any]:
+    """Fetch an X Article via Camofox.
+
+    ``input_str`` can be:
+      - A full article URL:  https://x.com/i/article/2011779830157557760
+      - A bare article ID:   2011779830157557760
+
+    Note: X Articles require login to read the full text. Without login,
+    only publicly visible content (title + preview) is captured.
+    Camofox must be running on the given port.
+
+    Returns a dict with:
+      article_id, url, title, author, author_handle, content,
+      word_count, char_count, is_partial, warning (if partial)
+    """
+    article_id = parse_article_id(input_str)
+    if not article_id:
+        return {
+            "input": input_str,
+            "error": t("err_invalid_article", input=input_str),
+        }
+
+    article_url = f"https://x.com/i/article/{article_id}"
+    result: Dict[str, Any] = {
+        "article_id": article_id,
+        "url": article_url,
+    }
+
+    if not check_camofox(camofox_port):
+        result["error"] = t("err_camofox_not_running_article", port=camofox_port)
+        return result
+
+    print(t("opening_article_via_camofox", url=article_url), file=sys.stderr)
+
+    # X Articles are JS-heavy; use a longer wait (10 s)
+    snapshot = camofox_fetch_page(
+        article_url,
+        session_key=f"article-{article_id}",
+        wait=10,
+        port=camofox_port,
+    )
+
+    if not snapshot:
+        result["error"] = t("err_snapshot_failed")
+        return result
+
+    parsed = parse_article_snapshot(snapshot)
+
+    result["title"] = parsed["title"]
+    result["author"] = parsed["author"]
+    result["author_handle"] = parsed["author_handle"]
+    result["content"] = parsed["content"]
+    result["word_count"] = parsed["word_count"]
+    result["char_count"] = parsed["char_count"]
+    result["is_partial"] = parsed["is_partial"]
+    result["paragraphs"] = parsed["paragraphs"]
+
+    if parsed["is_partial"]:
+        # Surface the login-wall note so callers / users understand the limitation
+        result["warning"] = t("article_login_note")
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1001,14 +1257,20 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "Fetch tweets from X/Twitter.\n"
-            "  --url <URL>            Single tweet via FxTwitter (zero deps)\n"
-            "  --url <URL> --replies  Tweet replies via Camofox + Nitter\n"
-            "  --user <username>      User timeline via Camofox + Nitter"
+            "  --url <URL>              Single tweet via FxTwitter (zero deps)\n"
+            "  --url <URL> --replies    Tweet replies via Camofox + Nitter\n"
+            "  --user <username>        User timeline via Camofox + Nitter\n"
+            "  --article <URL_or_ID>    X Article full text via Camofox\n"
+            "\n"
+            "Note: --article requires Camofox. X Articles also require X login\n"
+            "for full content; without login only public preview is captured."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--url", "-u", help="Tweet URL (x.com or twitter.com)")
     parser.add_argument("--user", help="X/Twitter username (without @)")
+    parser.add_argument("--article", "-a", metavar="URL_or_ID",
+                        help="X Article URL (https://x.com/i/article/ID) or bare article ID")
     parser.add_argument("--limit", type=int, default=50, help="Max tweets for --user (default: 50, supports pagination up to ~200)")
     parser.add_argument("--replies", "-r", action="store_true", help="Fetch replies (requires Camofox)")
     parser.add_argument("--pretty", "-p", action="store_true", help="Pretty print JSON")
@@ -1026,12 +1288,13 @@ def main():
     # Apply language setting globally before any t() calls
     _lang = args.lang
 
-    # Validate argument combinations
-    if args.user and args.url:
+    # Count how many primary modes are requested
+    _modes = [bool(args.url), bool(args.user), bool(args.article)]
+    if sum(_modes) > 1:
         print(t("err_mutually_exclusive"), file=sys.stderr)
         sys.exit(1)
 
-    if not args.user and not args.url:
+    if not any(_modes):
         parser.print_help()
         sys.exit(1)
 
@@ -1067,7 +1330,37 @@ def main():
             sys.exit(1)
         return
 
-    # ── Mode 2: Tweet replies ─────────────────────────────────────────────
+    # ── Mode 2: X Article ────────────────────────────────────────────────
+    if args.article:
+        result = fetch_article(
+            args.article,
+            camofox_port=args.port,
+        )
+
+        if args.text_only:
+            if result.get("error"):
+                print(t("err_prefix") + result["error"], file=sys.stderr)
+                sys.exit(1)
+            title = result.get("title") or "(no title)"
+            author = result.get("author") or result.get("author_handle") or ""
+            content = result.get("content", "")
+            wc = result.get("word_count", 0)
+            print(t("article_header", title=title))
+            if author:
+                print(f"@{result.get('author_handle', '').lstrip('@') or author}  {author}")
+            print(t("article_words", word_count=wc))
+            if result.get("warning"):
+                print(f"⚠️  {result['warning']}")
+            print()
+            print(content or "(empty)")
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2 if args.pretty else None))
+
+        if result.get("error"):
+            sys.exit(1)
+        return
+
+    # ── Mode 3: Tweet replies ─────────────────────────────────────────────
     if args.url and args.replies:
         result = fetch_tweet_replies(
             args.url,
@@ -1096,7 +1389,7 @@ def main():
             sys.exit(1)
         return
 
-    # ── Mode 3: Single tweet via FxTwitter (original, zero deps) ─────────
+    # ── Mode 4: Single tweet via FxTwitter (original, zero deps) ─────────
     result = fetch_tweet(args.url, timeout=args.timeout)
 
     if args.text_only:

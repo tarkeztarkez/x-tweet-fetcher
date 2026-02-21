@@ -10,7 +10,7 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies, ze
 |---------|---------|-------------|
 | Regular tweets | ✅ Full text + stats | None |
 | Long tweets | ✅ Full text | None |
-| X Articles (long-form) | ⚠️ Title only (FxTwitter limitation) | **Camofox recommended** |
+| X Articles (long-form) | ✅ Full text via `--article` (title+preview without login) | **Camofox required** |
 | Quoted tweets | ✅ Included | None |
 | Stats (likes/RT/views) | ✅ Included | None |
 | **Reply comments** | ⚠️ With comments | **Camofox required** |
@@ -61,6 +61,21 @@ Then use the `--replies` flag:
 ```bash
 python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123456" --replies
 ```
+
+### Fetching X Articles (Long-form Posts)
+
+```bash
+# By full article URL
+python3 scripts/fetch_tweet.py --article "https://x.com/i/article/2011779830157557760" --pretty
+
+# By bare article ID
+python3 scripts/fetch_tweet.py --article "2011779830157557760" --pretty
+
+# Human-readable output
+python3 scripts/fetch_tweet.py --article "https://x.com/i/article/2011779830157557760" --text-only
+```
+
+> **Note**: X Articles require X login to view full content. Without login, Camofox captures only the publicly visible portion (title + preview). This is an X platform limitation.
 
 ## Requirements
 
