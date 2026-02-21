@@ -117,6 +117,7 @@ PLATFORM_PATTERNS = {
     'bilibili': r'bilibili\.com|b23\.tv',
     'csdn': r'blog\.csdn\.net|csdn\.net',
     'weixin': r'mp\.weixin\.qq\.com',
+    'douyin': r'douyin\.com|v\.douyin\.com',
 }
 
 
@@ -1069,6 +1070,185 @@ class WeixinParser(PlatformParser):
 
 
 # ---------------------------------------------------------------------------
+# Douyin (抖音)
+# ---------------------------------------------------------------------------
+
+class DouyinParser(PlatformParser):
+    """Parser for Douyin (抖音) videos — extracts AI chapter summaries."""
+
+    name = "douyin"
+
+    def can_handle(self, url: str) -> bool:
+        return bool(re.search(r'douyin\.com|v\.douyin\.com', url, re.IGNORECASE))
+
+    def _resolve_short_url(self, url: str) -> str:
+        """Resolve v.douyin.com short URLs to full douyin.com URLs."""
+        if 'v.douyin.com' not in url:
+            return url
+        try:
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            resp = urllib.request.urlopen(req, timeout=10)
+            return resp.url
+        except Exception:
+            return url
+
+    def fetch(self, url: str, port: int = 9377) -> Dict[str, Any]:
+        if not check_camofox(port):
+            return {"url": url, "platform": "douyin", "error": t("camofox_not_running", port=port)}
+
+        print(t("opening_via_camofox", url=url), file=sys.stderr)
+
+        # Resolve short URL
+        resolved = self._resolve_short_url(url)
+
+        session_key = f"douyin-{int(time.time())}"
+        snapshot = camofox_fetch_page(resolved, session_key, wait=12, port=port)
+
+        if not snapshot:
+            return {"url": url, "platform": "douyin", "error": t("snapshot_failed")}
+
+        data = self._parse_snapshot(snapshot, url)
+        return data
+
+    def _parse_snapshot(self, snapshot: str, url: str) -> Dict[str, Any]:
+        """Parse Douyin video page snapshot."""
+        lines = snapshot.split("\n")
+
+        title = ""
+        author = ""
+        description = ""
+        published_at = ""
+        likes = 0
+        comments = 0
+        favorites = 0
+        shares = 0
+        chapters = []
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            # Title from heading
+            m = re.search(r'heading "(.+?)"', line)
+            if m and not title:
+                title = m.group(1)
+
+            # Author — typically a link to user profile
+            if 'douyin.com/user/' in line:
+                m2 = re.search(r'link "(.+?)"', line)
+                if m2 and not author:
+                    author = m2.group(1)
+
+            # Published time — e.g. "2026-02-20 06:19"
+            m_time = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', line)
+            if m_time and not published_at:
+                published_at = m_time.group(1)
+
+            # Stats — look for patterns like "22赞" or just numbers near like/comment/share
+            m_likes = re.search(r'["""]?(\d+(?:\.\d+)?万?)\s*赞', line)
+            if m_likes:
+                likes = parse_wan_number(m_likes.group(1))
+
+            m_comments = re.search(r'["""]?(\d+(?:\.\d+)?万?)\s*评论', line)
+            if m_comments:
+                comments = parse_wan_number(m_comments.group(1))
+
+            m_favs = re.search(r'["""]?(\d+(?:\.\d+)?万?)\s*收藏', line)
+            if m_favs:
+                favorites = parse_wan_number(m_favs.group(1))
+
+            m_shares = re.search(r'["""]?(\d+(?:\.\d+)?万?)\s*分享', line)
+            if m_shares:
+                shares = parse_wan_number(m_shares.group(1))
+
+            # Chapter summaries — look for timestamp patterns "00:00"
+            m_chapter = re.search(r'^-?\s*(?:text:?\s*)?(\d{1,2}:\d{2})\s+(.+)', line)
+            if m_chapter:
+                ts = m_chapter.group(1)
+                chapter_title = m_chapter.group(2).strip()
+                # Next line(s) may contain the summary
+                summary_lines = []
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].strip()
+                    if not next_line:
+                        j += 1
+                        continue
+                    # Stop if next chapter or non-paragraph content
+                    if re.search(r'^\d{1,2}:\d{2}\s', next_line):
+                        break
+                    if re.match(r'^-?\s*(?:text:?\s*)?(\d{1,2}:\d{2})', next_line):
+                        break
+                    if next_line.startswith(('- img', '- link', '- heading', "- button")):
+                        break
+                    # Collect paragraph text
+                    clean = re.sub(r'^-?\s*(?:paragraph:?\s*|text:?\s*)', '', next_line).strip()
+                    if clean:
+                        summary_lines.append(clean)
+                    j += 1
+                chapters.append({
+                    "timestamp": ts,
+                    "title": chapter_title,
+                    "summary": " ".join(summary_lines) if summary_lines else "",
+                })
+
+            # Description — long text blocks (not chapter content)
+            if 'paragraph' in line.lower() or (line.startswith('- text:') and len(line) > 80):
+                desc_text = re.sub(r'^-?\s*(?:paragraph:?\s*|text:?\s*)', '', line).strip()
+                if len(desc_text) > len(description):
+                    description = desc_text
+
+            i += 1
+
+        return {
+            "url": url,
+            "platform": "douyin",
+            "title": title,
+            "author": author,
+            "description": description,
+            "published_at": published_at,
+            "stats": {
+                "likes": likes,
+                "comments": comments,
+                "favorites": favorites,
+                "shares": shares,
+            },
+            "chapters": chapters,
+        }
+
+    def to_markdown(self, data: Dict[str, Any]) -> str:
+        parts = [f"# {data.get('title', 'Douyin Video')}\n"]
+        if data.get('author'):
+            parts.append(f"**作者**: {data['author']}")
+        if data.get('published_at'):
+            parts.append(f"**发布时间**: {data['published_at']}")
+
+        stats = data.get('stats', {})
+        stats_parts = []
+        if stats.get('likes'): stats_parts.append(f"👍 {stats['likes']}")
+        if stats.get('comments'): stats_parts.append(f"💬 {stats['comments']}")
+        if stats.get('favorites'): stats_parts.append(f"⭐ {stats['favorites']}")
+        if stats.get('shares'): stats_parts.append(f"🔄 {stats['shares']}")
+        if stats_parts:
+            parts.append(" | ".join(stats_parts))
+
+        if data.get('description'):
+            parts.append(f"\n## 描述\n\n{data['description']}")
+
+        chapters = data.get('chapters', [])
+        if chapters:
+            parts.append("\n## 章节摘要\n")
+            for ch in chapters:
+                parts.append(f"**{ch['timestamp']}** {ch['title']}")
+                if ch.get('summary'):
+                    parts.append(f"> {ch['summary']}\n")
+
+        parts.append(f"\n---\n*来源: {data.get('url', '')}*")
+        return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Parser registry
 # ---------------------------------------------------------------------------
 
@@ -1077,6 +1257,7 @@ PARSERS = [
     BilibiliParser(),
     CSDNParser(),
     WeixinParser(),
+    DouyinParser(),
 ]
 
 
