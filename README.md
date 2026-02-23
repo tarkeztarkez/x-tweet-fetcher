@@ -15,7 +15,7 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies, ze
 | Stats (likes/RT/views) | ✅ Included | None |
 | **Reply comments** | ⚠️ With comments | **Camofox required** |
 | **User timeline** | ⚠️ With timeline | **Camofox required** |
-| **Mentions 监控** | ⚠️ With monitor | **Camofox required** |
+| **Mentions monitoring** | ⚠️ With monitor | **Camofox required** |
 
 ## All Scripts
 
@@ -134,32 +134,56 @@ python3 scripts/x-profile-analyzer.py --user elonmusk --output report.md
 
 Generates MBTI, Big Five personality traits, topic graph, and communication style analysis from a user's tweets.
 
-## Monitoring X Mentions (Requires Camofox)
+## Monitor Mode (Requires Camofox)
 
-Track who mentions you on X, with incremental detection — perfect for cron jobs.
+Track X/Twitter mentions with incremental detection — perfect for cron jobs and notifications.
+
+### Basic Usage
 
 ```bash
-# 首次运行（建立基线，无输出）
-python3 scripts/fetch_tweet.py --monitor @YuLin807
+# First run (establishes baseline, no new mentions reported)
+python3 scripts/fetch_tweet.py --monitor @username
 
-# 后续运行（仅报告新 mentions）
-python3 scripts/fetch_tweet.py --monitor @YuLin807
+# Subsequent runs (reports only new mentions since last check)
+python3 scripts/fetch_tweet.py --monitor @username
 
 # Human-readable output
-python3 scripts/fetch_tweet.py --monitor @YuLin807 --text-only
+python3 scripts/fetch_tweet.py --monitor @username --text-only
 
-# 控制搜索结果数量（默认 10）
-python3 scripts/fetch_tweet.py --monitor @YuLin807 --limit 20
-
-# Cron 集成示例（有新 mentions 时退出码为 1）
-# */30 * * * * python3 /path/to/fetch_tweet.py --monitor @YuLin807 --text-only && echo "no new" || notify-send "New X mentions!"
+# Control search result count (default: 10 per strategy)
+python3 scripts/fetch_tweet.py --monitor @username --limit 20
 ```
 
-**How it works:**
-- First run: builds a baseline (no output, exit 0)
-- Subsequent runs: reports only new mentions since last check (exit 1 if found, exit 0 if none)
-- Uses dual search strategies: `site:x.com @username` + `site:x.com username`
-- Cache stored at `~/.x-tweet-fetcher/mentions-cache-{username}.json` (max 500 entries)
+### How It Works
+
+1. **Dual-Strategy Search**: Uses Google search via Camofox with two queries:
+   - `site:x.com @username` — direct @mentions
+   - `site:x.com username` — broader mentions without @
+
+2. **Local Cache Deduplication**:
+   - Cache file: `~/.x-tweet-fetcher/mentions-cache-{username}.json`
+   - Maximum 500 entries per user (rotates automatically)
+   - First run establishes baseline (all current mentions are cached)
+
+3. **Exit Codes** (cron-friendly):
+   - `0` — No new mentions found
+   - `1` — New mentions detected
+   - `2` — Error occurred
+
+### Cron Integration
+
+```bash
+# Check every 30 minutes, send notification on new mentions
+*/30 * * * * python3 /path/to/fetch_tweet.py --monitor @your_username --text-only || notify-send "New X mentions!"
+
+# Example with email notification
+0 * * * * python3 /path/to/fetch_tweet.py --monitor @your_username --text-only | mail -s "New X mentions" your@email.com
+
+# Example with Discord webhook (requires curl)
+*/15 * * * * python3 /path/to/fetch_tweet.py --monitor @your_username && echo "no new" || curl -X POST -d "{\"content\":\"New X mentions!\"}" $WEBHOOK_URL
+```
+
+**Note**: Since exit code 1 means "new content found", use `||` (OR) to trigger notifications when new mentions arrive.
 
 ## China Platform Support
 
