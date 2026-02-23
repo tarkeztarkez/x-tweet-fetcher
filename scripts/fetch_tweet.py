@@ -7,14 +7,21 @@ Modes:
   --url <URL> --replies    Fetch tweet + replies via Camofox + Nitter
   --user <username>        Fetch user timeline via Camofox + Nitter
   --article <URL_or_ID>    Fetch X Article (long-form) full text via Camofox
+  --monitor @username      Monitor X mentions (incremental, cron-friendly)
 
 Note on --article mode:
   X Articles (x.com/i/article/...) require X login to view the full content.
   Without login, Camofox will capture whatever is publicly visible (title +
   partial preview). This is an X platform limitation, not a tool limitation.
+
+Note on --monitor mode:
+  Uses Google search via Camofox to find mentions. First run establishes a
+  baseline (no output). Subsequent runs only report new mentions.
+  Exit code: 0 = no new mentions, 1 = new mentions found (cron-friendly).
 """
 
 import json
+import os
 import re
 import sys
 import argparse
@@ -22,6 +29,7 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
+from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 
@@ -84,6 +92,17 @@ _MESSAGES = {
         # FxTwitter network error
         "err_network": "网络错误：重试后仍无法获取推文",
         "err_unexpected": "获取推文时发生意外错误",
+        # monitor mode
+        "monitor_baseline": "[monitor] 首次运行，建立基线 ({count} 条)，下次运行起报告增量。",
+        "monitor_no_new": "[monitor] 无新 mentions（已知 {known} 条）。",
+        "monitor_new_found": "[monitor] 发现 {count} 条新 mentions！",
+        "monitor_searching": "[monitor] 搜索 mentions: {query}",
+        "monitor_camofox_error": (
+            "Camofox 未在 localhost:{port} 运行。"
+            "使用 --monitor 前请先启动 Camofox。"
+            "参考: https://github.com/openclaw/camofox"
+        ),
+        "monitor_header": "@{username} 的新 mentions ({count} 条)",
     },
     "en": {
         "opening_via_camofox": "[x-tweet-fetcher] Opening {url} via Camofox...",
@@ -135,6 +154,17 @@ _MESSAGES = {
         ),
         "err_network": "Network error: Failed to fetch tweet after retry",
         "err_unexpected": "An unexpected error occurred while fetching the tweet",
+        # monitor mode
+        "monitor_baseline": "[monitor] First run: baseline established ({count} entries). Future runs will report incremental results.",
+        "monitor_no_new": "[monitor] No new mentions (known: {known}).",
+        "monitor_new_found": "[monitor] Found {count} new mention(s)!",
+        "monitor_searching": "[monitor] Searching mentions: {query}",
+        "monitor_camofox_error": (
+            "Camofox is not running on localhost:{port}. "
+            "Please start Camofox before using --monitor. "
+            "See: https://github.com/openclaw/camofox"
+        ),
+        "monitor_header": "New mentions for @{username} ({count})",
     },
 }
 
@@ -1248,6 +1278,168 @@ def fetch_article(
 
 
 # ---------------------------------------------------------------------------
+# Mentions 监控（--monitor 模式）
+# ---------------------------------------------------------------------------
+
+# 缓存目录：~/.x-tweet-fetcher/
+_CACHE_DIR = Path.home() / ".x-tweet-fetcher"
+# 单个用户缓存最大保留 URL 数量
+_CACHE_MAX = 500
+
+
+def _get_cache_path(username: str) -> Path:
+    """返回指定用户的 mentions 缓存文件路径。"""
+    # 去掉 @ 前缀，统一小写，避免大小写重复
+    clean = username.lstrip("@").lower()
+    return _CACHE_DIR / f"mentions-cache-{clean}.json"
+
+
+def _load_cache(username: str) -> dict:
+    """加载 mentions 缓存，返回 {'seen': [...url...], 'is_baseline': bool}。"""
+    path = _get_cache_path(username)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 兼容旧格式（纯列表）
+            if isinstance(data, list):
+                return {"seen": data, "is_baseline": False}
+            return data
+        except Exception:
+            pass
+    return {"seen": [], "is_baseline": True}
+
+
+def _save_cache(username: str, cache: dict):
+    """保存 mentions 缓存到磁盘，超过上限时截断最旧条目。"""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # 限制缓存大小，保留最新的 _CACHE_MAX 条
+    if len(cache["seen"]) > _CACHE_MAX:
+        cache["seen"] = cache["seen"][-_CACHE_MAX:]
+    path = _get_cache_path(username)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _search_mentions(username: str, limit: int = 10, port: int = 9377) -> List[Dict]:
+    """
+    通过 Camofox + Google 搜索该用户的 mentions，返回去重后的搜索结果列表。
+
+    搜索策略：
+      1. site:x.com @username   — 带 @ 的直接提及
+      2. site:x.com username    — 不带 @ 的提及（更广）
+
+    每种策略最多取 limit 条，最终合并去重（以 URL 为 key）。
+    """
+    # 避免循环 import：在函数内部 import
+    try:
+        import sys as _sys
+        import os as _os
+        # 将 scripts/ 目录加入路径，确保 camofox_client 可 import
+        scripts_dir = _os.path.dirname(_os.path.abspath(__file__))
+        if scripts_dir not in _sys.path:
+            _sys.path.insert(0, scripts_dir)
+        from camofox_client import camofox_search
+    except ImportError:
+        # fallback：直接用内置的 camofox_search（如果在同目录运行）
+        from scripts.camofox_client import camofox_search
+
+    clean = username.lstrip("@")
+    queries = [
+        f"site:x.com @{clean}",
+        f"site:x.com {clean}",
+    ]
+
+    seen_urls: set = set()
+    results: List[Dict] = []
+
+    for query in queries:
+        print(t("monitor_searching", query=query), file=sys.stderr)
+        raw = camofox_search(query, num=limit, port=port)
+        for item in raw:
+            url = item.get("url", "").strip()
+            # 只保留 x.com 下的推文 URL（过滤搜索引擎导航链接）
+            if url and url not in seen_urls and "x.com" in url:
+                seen_urls.add(url)
+                results.append({
+                    "url": url,
+                    "title": item.get("title", ""),
+                    "snippet": item.get("snippet", ""),
+                })
+
+    return results
+
+
+def monitor_mentions(
+    username: str,
+    limit: int = 10,
+    camofox_port: int = 9377,
+) -> Dict[str, Any]:
+    """
+    监控 X mentions 增量变化。
+
+    首次运行：建立基线，不报任何新内容（exit code 0）。
+    后续运行：与缓存对比，只报告新增 URL（exit code 1 = 有新内容）。
+
+    返回格式：
+    {
+        "username": "...",
+        "new_mentions": [...],   # 新增条目列表
+        "is_baseline": True/False,
+        "known_count": N,
+        "error": "..." (可选)
+    }
+    """
+    result: Dict[str, Any] = {
+        "username": username.lstrip("@"),
+        "new_mentions": [],
+        "is_baseline": False,
+        "known_count": 0,
+    }
+
+    # 检查 Camofox 是否运行
+    if not check_camofox(camofox_port):
+        result["error"] = t("monitor_camofox_error", port=camofox_port)
+        return result
+
+    # 加载本地缓存
+    cache = _load_cache(username)
+    seen_set = set(cache["seen"])
+    result["known_count"] = len(seen_set)
+
+    # 搜索 mentions
+    all_results = _search_mentions(username, limit=limit, port=camofox_port)
+
+    if cache["is_baseline"]:
+        # 首次运行：将所有搜索结果写入缓存作为基线，不报新内容
+        new_urls = [r["url"] for r in all_results]
+        cache["seen"] = list(seen_set | set(new_urls))
+        cache["is_baseline"] = False
+        _save_cache(username, cache)
+        result["is_baseline"] = True
+        result["known_count"] = len(cache["seen"])
+        print(t("monitor_baseline", count=len(cache["seen"])), file=sys.stderr)
+    else:
+        # 后续运行：只报告不在缓存中的新条目
+        new_mentions = [r for r in all_results if r["url"] not in seen_set]
+
+        # 将新 URL 加入缓存
+        for r in new_mentions:
+            cache["seen"].append(r["url"])
+        _save_cache(username, cache)
+
+        result["new_mentions"] = new_mentions
+        result["known_count"] = len(cache["seen"])
+
+        if new_mentions:
+            print(t("monitor_new_found", count=len(new_mentions)), file=sys.stderr)
+        else:
+            print(t("monitor_no_new", known=len(seen_set)), file=sys.stderr)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1261,9 +1453,12 @@ def main():
             "  --url <URL> --replies    Tweet replies via Camofox + Nitter\n"
             "  --user <username>        User timeline via Camofox + Nitter\n"
             "  --article <URL_or_ID>    X Article full text via Camofox\n"
+            "  --monitor @username      Monitor X mentions (incremental, cron-friendly)\n"
             "\n"
             "Note: --article requires Camofox. X Articles also require X login\n"
-            "for full content; without login only public preview is captured."
+            "for full content; without login only public preview is captured.\n"
+            "Note: --monitor requires Camofox. First run builds a baseline (no output).\n"
+            "Subsequent runs report only new mentions. Exit code 1 = new content found."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1271,7 +1466,9 @@ def main():
     parser.add_argument("--user", help="X/Twitter username (without @)")
     parser.add_argument("--article", "-a", metavar="URL_or_ID",
                         help="X Article URL (https://x.com/i/article/ID) or bare article ID")
-    parser.add_argument("--limit", type=int, default=50, help="Max tweets for --user (default: 50, supports pagination up to ~200)")
+    parser.add_argument("--monitor", "-m", metavar="@USERNAME",
+                        help="Monitor X mentions for a username (requires Camofox)")
+    parser.add_argument("--limit", type=int, default=50, help="Max tweets for --user / max results for --monitor (default: 50 for --user, 10 for --monitor)")
     parser.add_argument("--replies", "-r", action="store_true", help="Fetch replies (requires Camofox)")
     parser.add_argument("--pretty", "-p", action="store_true", help="Pretty print JSON")
     parser.add_argument("--text-only", "-t", action="store_true", help="Human-readable output")
@@ -1289,7 +1486,7 @@ def main():
     _lang = args.lang
 
     # Count how many primary modes are requested
-    _modes = [bool(args.url), bool(args.user), bool(args.article)]
+    _modes = [bool(args.url), bool(args.user), bool(args.article), bool(args.monitor)]
     if sum(_modes) > 1:
         print(t("err_mutually_exclusive"), file=sys.stderr)
         sys.exit(1)
@@ -1299,6 +1496,45 @@ def main():
         sys.exit(1)
 
     indent = 2 if args.pretty else None
+
+    # ── Mode 0: Mentions 监控 ─────────────────────────────────────────────
+    if args.monitor:
+        # --limit 对 --monitor 默认 10（搜索结果），若用户显式传 limit 则用用户的值
+        monitor_limit = args.limit if args.limit != 50 else 10
+        result = monitor_mentions(
+            args.monitor,
+            limit=monitor_limit,
+            camofox_port=args.port,
+        )
+
+        if result.get("error"):
+            print(t("err_prefix") + result["error"], file=sys.stderr)
+            sys.exit(2)
+
+        if result.get("is_baseline"):
+            # 首次建基线，静默退出（exit 0）
+            if not args.text_only:
+                print(json.dumps(result, ensure_ascii=False, indent=indent))
+            sys.exit(0)
+
+        new_mentions = result.get("new_mentions", [])
+
+        if args.text_only:
+            username_clean = result["username"]
+            if new_mentions:
+                print(t("monitor_header", username=username_clean, count=len(new_mentions)) + "\n")
+                for idx, m in enumerate(new_mentions, 1):
+                    print(f"[{idx}] {m['title']}")
+                    print(f"     {m['url']}")
+                    if m.get("snippet"):
+                        print(f"     {m['snippet'][:120]}")
+                    print()
+            # 无新内容时 text-only 模式不输出任何内容（方便 cron）
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=indent))
+
+        # exit 1 = 有新 mentions（cron 友好），exit 0 = 无新内容
+        sys.exit(1 if new_mentions else 0)
 
     # ── Mode 1: User timeline ─────────────────────────────────────────────
     if args.user:

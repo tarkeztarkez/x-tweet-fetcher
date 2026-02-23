@@ -15,12 +15,13 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies, ze
 | Stats (likes/RT/views) | ✅ Included | None |
 | **Reply comments** | ⚠️ With comments | **Camofox required** |
 | **User timeline** | ⚠️ With timeline | **Camofox required** |
+| **Mentions 监控** | ⚠️ With monitor | **Camofox required** |
 
 ## All Scripts
 
 | 脚本 | 功能 | 依赖 |
 |------|------|------|
-| `scripts/fetch_tweet.py` | 抓推文/评论区/用户时间线 | 基础无依赖，评论区需 Camofox |
+| `scripts/fetch_tweet.py` | 抓推文/评论区/用户时间线 / Mentions 监控 | 基础无依赖，评论区/监控需 Camofox |
 | `scripts/camofox_client.py` | Google 搜索（无需 API key） | Camofox |
 | `scripts/x-profile-analyzer.py` | X 用户画像分析（MBTI/大五/话题图谱） | Camofox + LLM API |
 | `scripts/fetch_china.py` | 国内平台抓取（微博/B站/CSDN/微信公众号） | 微信无依赖，其他需 Camofox |
@@ -132,6 +133,33 @@ python3 scripts/x-profile-analyzer.py --user elonmusk --output report.md
 ```
 
 Generates MBTI, Big Five personality traits, topic graph, and communication style analysis from a user's tweets.
+
+## Monitoring X Mentions (Requires Camofox)
+
+Track who mentions you on X, with incremental detection — perfect for cron jobs.
+
+```bash
+# 首次运行（建立基线，无输出）
+python3 scripts/fetch_tweet.py --monitor @YuLin807
+
+# 后续运行（仅报告新 mentions）
+python3 scripts/fetch_tweet.py --monitor @YuLin807
+
+# Human-readable output
+python3 scripts/fetch_tweet.py --monitor @YuLin807 --text-only
+
+# 控制搜索结果数量（默认 10）
+python3 scripts/fetch_tweet.py --monitor @YuLin807 --limit 20
+
+# Cron 集成示例（有新 mentions 时退出码为 1）
+# */30 * * * * python3 /path/to/fetch_tweet.py --monitor @YuLin807 --text-only && echo "no new" || notify-send "New X mentions!"
+```
+
+**How it works:**
+- First run: builds a baseline (no output, exit 0)
+- Subsequent runs: reports only new mentions since last check (exit 1 if found, exit 0 if none)
+- Uses dual search strategies: `site:x.com @username` + `site:x.com username`
+- Cache stored at `~/.x-tweet-fetcher/mentions-cache-{username}.json` (max 500 entries)
 
 ## China Platform Support
 
