@@ -10,6 +10,10 @@ Usage:
   # Resolve to real mp.weixin.qq.com URLs (via Google/DuckDuckGo)
   python3 sogou_wechat.py --keyword "AI Agent" --limit 3 --resolve --json
 
+  # Use SSH proxy to avoid IP bans (set env vars)
+  export SOGOU_SSH_HOST=user@host
+  python3 sogou_wechat.py --keyword "AI Agent" --via-ssh
+
 Workflow: Sogou search → get titles → Google/DDG find real WeChat URL → fetch_china.py reads full text
 """
 
@@ -19,7 +23,71 @@ import re
 import json
 import argparse
 import sys
+import os
 import html as html_lib
+import subprocess
+
+
+def sogou_wechat_search_via_ssh(keyword, max_results=10, ssh_host=None):
+    """Search Sogou WeChat via SSH proxy to avoid IP bans.
+    
+    Requires: SOGOU_SSH_HOST env var or ssh_host param (e.g. user@host).
+    """
+    host = ssh_host or os.environ.get("SOGOU_SSH_HOST")
+    if not host:
+        print("SOGOU_SSH_HOST not set, falling back to direct", file=sys.stderr)
+        return sogou_wechat_search(keyword, max_results)
+
+    script = f'''
+import requests, re, json, html as html_lib
+from urllib.parse import quote
+headers = {{"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}}
+url = f"https://weixin.sogou.com/weixin?type=2&query={{quote({repr(keyword)})}}"
+r = requests.get(url, headers=headers, timeout=10)
+results = []
+blocks = re.findall(r'<div class="txt-box">(.*?)</div>\\s*</div>', r.text, re.DOTALL)
+for block in blocks[:{max_results}]:
+    title_m = re.search(r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', block, re.DOTALL)
+    if not title_m: continue
+    article_url = title_m.group(1).replace("&amp;", "&")
+    title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
+    title = html_lib.unescape(title)
+    author_m = re.search(r'<a[^>]*class="account"[^>]*>(.*?)</a>', block, re.DOTALL)
+    author = re.sub(r'<[^>]+>', '', author_m.group(1)).strip() if author_m else ''
+    snippet_m = re.search(r'<p class="txt-info">(.*?)</p>', block, re.DOTALL)
+    snippet = re.sub(r'<[^>]+>', '', snippet_m.group(1)).strip() if snippet_m else ''
+    snippet = html_lib.unescape(snippet)
+    from datetime import datetime
+    date_m = re.search(r"document\\.write\\(timeConvert\\('(\\d+)'\\)\\)", block)
+    date = datetime.fromtimestamp(int(date_m.group(1))).strftime('%Y-%m-%d') if date_m else ''
+    if article_url.startswith('/link'): article_url = 'https://weixin.sogou.com' + article_url
+    results.append({{"title": title, "url": article_url, "author": author, "snippet": snippet, "date": date}})
+print(json.dumps(results, ensure_ascii=False))
+'''
+    try:
+        # Write script to temp file and scp to remote
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(script)
+            local_path = f.name
+        
+        remote_path = "/tmp/_sogou_search.py"
+        subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", local_path, f"{host}:{remote_path}"],
+                       capture_output=True, timeout=10)
+        os.unlink(local_path)
+        
+        result = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=5", host, "python3", remote_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout.strip())
+        else:
+            print(f"SSH search failed: {result.stderr[:100]}", file=sys.stderr)
+            return sogou_wechat_search(keyword, max_results)
+    except Exception as e:
+        print(f"SSH error: {e}, falling back to direct", file=sys.stderr)
+        return sogou_wechat_search(keyword, max_results)
 
 
 def sogou_wechat_search(keyword, max_results=10):
@@ -151,9 +219,13 @@ def main():
     parser.add_argument("--limit", "-l", type=int, default=10, help="Max results")
     parser.add_argument("--json", "-j", action="store_true", help="Output JSON")
     parser.add_argument("--resolve", "-r", action="store_true", help="Resolve Sogou links to real WeChat URLs (requires Camofox)")
+    parser.add_argument("--via-ssh", action="store_true", help="Route search via SSH proxy (set SOGOU_SSH_HOST env var)")
     args = parser.parse_args()
 
-    results = sogou_wechat_search(args.keyword, args.limit)
+    if args.via_ssh:
+        results = sogou_wechat_search_via_ssh(args.keyword, args.limit)
+    else:
+        results = sogou_wechat_search(args.keyword, args.limit)
 
     if args.resolve and results:
         print("Resolving to real WeChat URLs (Sogou → Google/DuckDuckGo → mp.weixin.qq.com)...", file=sys.stderr)
