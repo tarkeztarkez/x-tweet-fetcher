@@ -1469,13 +1469,98 @@ class XiaohongshuParser(PlatformParser):
             },
         }
 
-    def fetch(self, url: str, port: int = 9377) -> Dict[str, Any]:
+    def _fetch_via_proxy(self, url: str, proxy: str, cookies: str = None) -> Optional[str]:
+        """Fetch page HTML via user-provided proxy."""
+        try:
+            proxy_handler = urllib.request.ProxyHandler({
+                'http': proxy, 'https': proxy,
+            })
+            opener = urllib.request.build_opener(proxy_handler)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                              'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+            }
+            if cookies:
+                headers['Cookie'] = cookies
+            req = urllib.request.Request(url, headers=headers)
+            with opener.open(req, timeout=15) as r:
+                html = r.read().decode('utf-8', errors='ignore')
+                if len(html) > 500:
+                    return html
+        except Exception as e:
+            print(f"[xiaohongshu] 代理抓取失败: {e}", file=sys.stderr)
+        return None
+
+    def _fetch_with_cookies(self, url: str, cookies: str) -> Optional[str]:
+        """Fetch page HTML with cookies (direct request, no proxy)."""
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                              'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Cookie': cookies,
+            })
+            with urllib.request.urlopen(req, timeout=15) as r:
+                html = r.read().decode('utf-8', errors='ignore')
+                if len(html) > 500:
+                    return html
+        except Exception as e:
+            print(f"[xiaohongshu] Cookie 抓取失败: {e}", file=sys.stderr)
+        return None
+
+    def _load_cookies(self, cookies_arg: str) -> Optional[str]:
+        """Load cookies from string or file path (supports Cookie-Editor JSON export)."""
+        if not cookies_arg:
+            return None
+        import os
+        if os.path.isfile(cookies_arg):
+            try:
+                with open(cookies_arg, 'r') as f:
+                    content = f.read().strip()
+                if content.startswith('['):
+                    data = json.loads(content)
+                    return '; '.join(f"{c['name']}={c['value']}" for c in data
+                                     if '.xiaohongshu.com' in c.get('domain', ''))
+                return content
+            except Exception:
+                pass
+        return cookies_arg
+
+    def fetch(self, url: str, port: int = 9377, proxy: str = None, cookies: str = None) -> Dict[str, Any]:
         note_id = self._extract_note_id(url)
         if not note_id:
             return {"url": url, "platform": "xiaohongshu", "error": "无法从 URL 提取笔记 ID"}
         
         # Normalize URL
         canonical = f"https://www.xiaohongshu.com/explore/{note_id}"
+        
+        # Load cookies
+        cookie_str = self._load_cookies(cookies)
+        
+        # Method 0: Proxy + optional cookies (user-provided, fastest)
+        if proxy:
+            print(f"[xiaohongshu] 尝试通过代理 {proxy[:30]}... 抓取", file=sys.stderr)
+            html = self._fetch_via_proxy(canonical, proxy, cookie_str)
+            if html:
+                state = self._parse_initial_state(html)
+                if state:
+                    data = self._parse_note_from_state(state, url)
+                    if data and data.get('content'):
+                        return data
+        
+        # Method 0.5: Cookies without proxy (works if user has domestic IP)
+        if cookie_str and not proxy:
+            print("[xiaohongshu] 尝试通过 Cookies 直接抓取...", file=sys.stderr)
+            html = self._fetch_with_cookies(canonical, cookie_str)
+            if html:
+                state = self._parse_initial_state(html)
+                if state:
+                    data = self._parse_note_from_state(state, url)
+                    if data and data.get('content'):
+                        return data
         
         # Method 1: Try router home IP (bypasses geo-block)
         print("[xiaohongshu] 尝试通过路由器家庭 IP 抓取...", file=sys.stderr)
@@ -1518,7 +1603,8 @@ class XiaohongshuParser(PlatformParser):
             "url": url,
             "platform": "xiaohongshu",
             "note_id": note_id,
-            "error": "无法获取笔记内容。小红书需要国内 IP 或登录态。建议: --via-router 或提供 cookies",
+            "error": "无法获取笔记内容。小红书需要国内 IP 或登录态。\n"
+                     "建议: --proxy socks5://ip:port 或 --cookies 'cookie_string' 或 --cookies cookies.json",
         }
 
     def to_markdown(self, data: Dict[str, Any]) -> str:
@@ -1581,7 +1667,7 @@ def get_parser(url: str) -> Optional[PlatformParser]:
 # Main fetch function
 # ---------------------------------------------------------------------------
 
-def fetch(url: str, port: int = 9377) -> Dict[str, Any]:
+def fetch(url: str, port: int = 9377, proxy: str = None, cookies: str = None) -> Dict[str, Any]:
     """Fetch content from any supported platform."""
     platform = identify_platform(url)
     if not platform:
@@ -1591,6 +1677,9 @@ def fetch(url: str, port: int = 9377) -> Dict[str, Any]:
     if not parser:
         return {"url": url, "error": t("platform_unsupported", platform=platform)}
 
+    # Pass proxy/cookies to parsers that support them
+    if isinstance(parser, XiaohongshuParser):
+        return parser.fetch(url, port, proxy=proxy, cookies=cookies)
     return parser.fetch(url, port)
 
 
@@ -1618,6 +1707,8 @@ def main():
     parser.add_argument("--text-only", "-t", action="store_true", help="Human-readable output")
     parser.add_argument("--markdown", "-m", action="store_true", help="Markdown output with YAML frontmatter")
     parser.add_argument("--port", type=int, default=9377, help="Camofox port (default: 9377)")
+    parser.add_argument("--proxy", help="HTTP/SOCKS proxy URL (e.g. socks5://127.0.0.1:1080)")
+    parser.add_argument("--cookies", help="Cookie string or path to cookies.json file")
     parser.add_argument(
         "--lang", default="zh", choices=["zh", "en"],
         help="Output language: zh (default) or en",
@@ -1631,7 +1722,8 @@ def main():
     indent = 2 if args.pretty else None
 
     # Fetch content
-    result = fetch(args.url, port=args.port)
+    result = fetch(args.url, port=args.port, proxy=getattr(args, 'proxy', None),
+                   cookies=getattr(args, 'cookies', None))
 
     # Output
     platform_parser = get_parser(args.url)
