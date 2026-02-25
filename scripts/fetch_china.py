@@ -2,7 +2,7 @@
 """
 China Platform Fetcher - Fetch posts from Chinese platforms.
 
-Supported: Weibo, Bilibili, CSDN, WeChat (微信公众号).
+Supported: Weibo, Bilibili, CSDN, WeChat (微信公众号), Xiaohongshu (小红书).
 Uses Camofox for server-side rendering, or direct HTTP for public pages.
 Supports automatic platform detection and multiple output formats.
 """
@@ -118,6 +118,7 @@ PLATFORM_PATTERNS = {
     'csdn': r'blog\.csdn\.net|csdn\.net',
     'weixin': r'mp\.weixin\.qq\.com',
     'douyin': r'douyin\.com|v\.douyin\.com',
+    'xiaohongshu': r'xiaohongshu\.com|xhslink\.com',
 }
 
 
@@ -1249,6 +1250,312 @@ class DouyinParser(PlatformParser):
 
 
 # ---------------------------------------------------------------------------
+# Xiaohongshu (小红书) parser
+# ---------------------------------------------------------------------------
+
+class XiaohongshuParser(PlatformParser):
+    """Parser for Xiaohongshu (小红书) notes — extracts text, images, stats."""
+
+    name = "xiaohongshu"
+
+    # Mobile API endpoint for note detail (no login required for public notes)
+    _API_URL = "https://edith.xiaohongshu.com/api/sns/web/v1/feed"
+    _SEARCH_API = "https://edith.xiaohongshu.com/api/sns/web/v1/search/notes"
+
+    def can_handle(self, url: str) -> bool:
+        return bool(re.search(r'xiaohongshu\.com|xhslink\.com', url, re.IGNORECASE))
+
+    def _extract_note_id(self, url: str) -> Optional[str]:
+        """Extract note ID from various URL formats."""
+        # https://www.xiaohongshu.com/explore/67b8e3f5000000000b00d8e2
+        # https://www.xiaohongshu.com/discovery/item/67b8e3f5000000000b00d8e2
+        m = re.search(r'(?:explore|discovery/item|notes?)/([a-f0-9]{24})', url)
+        if m:
+            return m.group(1)
+        # xhslink.com short URLs — resolve first
+        if 'xhslink.com' in url:
+            try:
+                req = urllib.request.Request(url, method='HEAD')
+                req.add_header('User-Agent', 'Mozilla/5.0')
+                resp = urllib.request.urlopen(req, timeout=10)
+                return self._extract_note_id(resp.url)
+            except Exception:
+                pass
+        return None
+
+    def _fetch_via_router(self, url: str) -> Optional[str]:
+        """Fetch page HTML via router's home IP (bypasses geo-block)."""
+        import subprocess
+        cmd_queue = "/root/router-agent/cmd-queue"
+        cmd_output = "/root/router-agent/cmd-output"
+        
+        # Write curl command to router queue
+        curl_cmd = (
+            f'curl -sL "{url}" '
+            f'-H "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+            f'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" '
+            f'-H "Accept: text/html" '
+            f'-H "Accept-Language: zh-CN,zh;q=0.9" '
+            f'--max-time 15 2>/dev/null'
+        )
+        
+        try:
+            # Clear old output
+            subprocess.run(['bash', '-c', f'> {cmd_output}'], timeout=3)
+            # Queue command
+            with open(cmd_queue, 'w') as f:
+                f.write(curl_cmd)
+            
+            # Wait for router to execute (polls every minute)
+            print("[xiaohongshu] 等待路由器执行抓取（最多90秒）...", file=sys.stderr)
+            for _ in range(18):  # 18 * 5s = 90s
+                time.sleep(5)
+                try:
+                    with open(cmd_output, 'r') as f:
+                        content = f.read()
+                    if content and len(content) > 500:
+                        return content
+                except FileNotFoundError:
+                    pass
+        except Exception as e:
+            print(f"[xiaohongshu] 路由器抓取失败: {e}", file=sys.stderr)
+        return None
+
+    def _parse_initial_state(self, html: str) -> Optional[Dict]:
+        """Extract __INITIAL_STATE__ JSON from SSR HTML."""
+        m = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.+?})\s*</script>', html, re.DOTALL)
+        if not m:
+            # Try alternate pattern
+            m = re.search(r'__INITIAL_STATE__\s*=\s*({.+?})(?:\s*;|\s*</)', html, re.DOTALL)
+        if m:
+            try:
+                # XHS uses undefined in JSON, replace with null
+                raw = m.group(1).replace('undefined', 'null')
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    def _parse_note_from_state(self, state: Dict, url: str) -> Dict[str, Any]:
+        """Parse note data from __INITIAL_STATE__."""
+        note_data = {}
+        
+        # Navigate the state tree to find note
+        # Structure: noteDetailMap -> note_id -> note
+        detail_map = state.get('note', {}).get('noteDetailMap', {})
+        if not detail_map:
+            detail_map = state.get('noteDetailMap', {})
+        
+        for note_id, wrapper in detail_map.items():
+            note = wrapper.get('note', wrapper)
+            
+            title = note.get('title', '')
+            desc = note.get('desc', '')
+            
+            # Author
+            user = note.get('user', {})
+            author = user.get('nickname', user.get('nick_name', ''))
+            
+            # Images
+            image_list = note.get('imageList', note.get('image_list', []))
+            images = []
+            for img in image_list:
+                img_url = img.get('urlDefault', img.get('url', img.get('url_default', '')))
+                if img_url:
+                    images.append(img_url)
+            
+            # Stats
+            interact = note.get('interactInfo', note.get('interact_info', {}))
+            likes = parse_wan_number(str(interact.get('likedCount', interact.get('liked_count', 0))))
+            collected = parse_wan_number(str(interact.get('collectedCount', interact.get('collected_count', 0))))
+            comments_count = parse_wan_number(str(interact.get('commentCount', interact.get('comment_count', 0))))
+            shared = parse_wan_number(str(interact.get('shareCount', interact.get('share_count', 0))))
+            
+            # Tags
+            tag_list = note.get('tagList', note.get('tag_list', []))
+            tags = [t_item.get('name', '') for t_item in tag_list if t_item.get('name')]
+            
+            # Time
+            create_time = note.get('time', note.get('createTime', ''))
+            if isinstance(create_time, (int, float)) and create_time > 1000000000:
+                create_time = datetime.fromtimestamp(
+                    create_time / 1000 if create_time > 1e12 else create_time,
+                    tz=timezone(timedelta(hours=8))
+                ).strftime('%Y-%m-%d %H:%M')
+            
+            # Type
+            note_type = note.get('type', '')  # 'normal' (image) or 'video'
+            
+            note_data = {
+                "url": url,
+                "platform": "xiaohongshu",
+                "note_id": note_id,
+                "title": title,
+                "author": author,
+                "content": desc,
+                "type": "video" if note_type == 'video' else "image",
+                "images": images,
+                "tags": tags,
+                "published_at": str(create_time),
+                "stats": {
+                    "likes": likes,
+                    "favorites": collected,
+                    "comments": comments_count,
+                    "shares": shared,
+                },
+            }
+            break  # Take first note
+        
+        return note_data
+
+    def _parse_snapshot(self, snapshot: str, url: str) -> Dict[str, Any]:
+        """Parse Camofox snapshot of XHS page (fallback)."""
+        lines = snapshot.split("\n")
+        
+        title = ""
+        author = ""
+        content_lines = []
+        likes = 0
+        comments = 0
+        favorites = 0
+        shares = 0
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Title from heading
+            m = re.search(r'heading "(.+?)"', line)
+            if m and not title:
+                title = m.group(1)
+            
+            # Author
+            if 'user/profile' in line:
+                m2 = re.search(r'link "(.+?)"', line)
+                if m2 and not author:
+                    author = m2.group(1)
+            
+            # Content text
+            if line.startswith('- text:') and len(line) > 20:
+                text = line[8:].strip()
+                if text and text not in ('发现', '发布', '通知', '关注', '收藏', '评论', '分享'):
+                    content_lines.append(text)
+            
+            # Stats
+            m_likes = re.search(r'(\d+(?:\.\d+)?万?)\s*(?:赞|点赞)', line)
+            if m_likes:
+                likes = parse_wan_number(m_likes.group(1))
+            m_fav = re.search(r'(\d+(?:\.\d+)?万?)\s*收藏', line)
+            if m_fav:
+                favorites = parse_wan_number(m_fav.group(1))
+            m_comm = re.search(r'(\d+(?:\.\d+)?万?)\s*评论', line)
+            if m_comm:
+                comments = parse_wan_number(m_comm.group(1))
+        
+        return {
+            "url": url,
+            "platform": "xiaohongshu",
+            "title": title,
+            "author": author,
+            "content": "\n".join(content_lines),
+            "type": "unknown",
+            "images": [],
+            "tags": [],
+            "published_at": "",
+            "stats": {
+                "likes": likes,
+                "favorites": favorites,
+                "comments": comments,
+                "shares": shares,
+            },
+        }
+
+    def fetch(self, url: str, port: int = 9377) -> Dict[str, Any]:
+        note_id = self._extract_note_id(url)
+        if not note_id:
+            return {"url": url, "platform": "xiaohongshu", "error": "无法从 URL 提取笔记 ID"}
+        
+        # Normalize URL
+        canonical = f"https://www.xiaohongshu.com/explore/{note_id}"
+        
+        # Method 1: Try router home IP (bypasses geo-block)
+        print("[xiaohongshu] 尝试通过路由器家庭 IP 抓取...", file=sys.stderr)
+        html = self._fetch_via_router(canonical)
+        if html:
+            state = self._parse_initial_state(html)
+            if state:
+                data = self._parse_note_from_state(state, url)
+                if data and data.get('content'):
+                    return data
+                    
+            # Even without __INITIAL_STATE__, try meta tags
+            title_m = re.search(r'<meta[^>]*name="og:title"[^>]*content="([^"]*)"', html)
+            desc_m = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', html)
+            if desc_m and len(desc_m.group(1)) > 20:
+                return {
+                    "url": url,
+                    "platform": "xiaohongshu",
+                    "note_id": note_id,
+                    "title": title_m.group(1) if title_m else "",
+                    "author": "",
+                    "content": desc_m.group(1),
+                    "type": "unknown",
+                    "images": [],
+                    "tags": [],
+                    "published_at": "",
+                    "stats": {},
+                }
+        
+        # Method 2: Try Camofox browser
+        if check_camofox(port):
+            print(t("opening_via_camofox", url=canonical), file=sys.stderr)
+            snapshot = camofox_fetch_page(canonical, f"xhs-{note_id[:8]}", wait=10, port=port)
+            if snapshot and len(snapshot) > 500:
+                data = self._parse_snapshot(snapshot, url)
+                if data.get('content') or data.get('title'):
+                    return data
+        
+        return {
+            "url": url,
+            "platform": "xiaohongshu",
+            "note_id": note_id,
+            "error": "无法获取笔记内容。小红书需要国内 IP 或登录态。建议: --via-router 或提供 cookies",
+        }
+
+    def to_markdown(self, data: Dict[str, Any]) -> str:
+        parts = [f"# {data.get('title', '小红书笔记')}\n"]
+        if data.get('author'):
+            parts.append(f"**作者**: {data['author']}")
+        if data.get('published_at'):
+            parts.append(f"**发布时间**: {data['published_at']}")
+        if data.get('type'):
+            parts.append(f"**类型**: {data['type']}")
+
+        stats = data.get('stats', {})
+        stats_parts = []
+        if stats.get('likes'): stats_parts.append(f"❤️ {stats['likes']}")
+        if stats.get('favorites'): stats_parts.append(f"⭐ {stats['favorites']}")
+        if stats.get('comments'): stats_parts.append(f"💬 {stats['comments']}")
+        if stats.get('shares'): stats_parts.append(f"🔄 {stats['shares']}")
+        if stats_parts:
+            parts.append(" | ".join(stats_parts))
+
+        if data.get('content'):
+            parts.append(f"\n## 内容\n\n{data['content']}")
+
+        if data.get('tags'):
+            parts.append(f"\n**标签**: {' '.join('#' + t_item for t_item in data['tags'])}")
+
+        images = data.get('images', [])
+        if images:
+            parts.append(f"\n## 图片 ({len(images)})\n")
+            for i, img in enumerate(images, 1):
+                parts.append(f"![图片{i}]({img})")
+
+        parts.append(f"\n---\n*来源: {data.get('url', '')}*")
+        return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Parser registry
 # ---------------------------------------------------------------------------
 
@@ -1258,6 +1565,7 @@ PARSERS = [
     CSDNParser(),
     WeixinParser(),
     DouyinParser(),
+    XiaohongshuParser(),
 ]
 
 
@@ -1295,7 +1603,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Fetch posts from Chinese platforms (Weibo, Bilibili, CSDN).\n"
+            "Fetch posts from Chinese platforms (Weibo, Bilibili, CSDN, Xiaohongshu).\n"
             "  --url <URL>    Platform URL to fetch\n"
             "  --pretty      Pretty print JSON\n"
             "  --text-only   Human-readable output\n"
