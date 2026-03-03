@@ -17,12 +17,14 @@ An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies for
 | Fetch user timeline | `fetch_tweet.py --user` | Camofox | JSON: tweet list with pagination |
 | Fetch X Articles | `fetch_tweet.py --article` | Camofox | JSON: full long-form text |
 | Monitor @mentions | `fetch_tweet.py --monitor` | Camofox | JSON: new mentions since last check |
+| **Monitor @mentions via Nitter** | `x_mentions_nitter.py` | Camofox | JSON: new mentions (fast, real-time) |
 | **Search WeChat articles** | `sogou_wechat.py` | None | JSON: title, url, author, date |
 | **Discover tweets by keyword** | `x_discover.py` | None (DuckDuckGo) or Camofox | JSON: url, title, snippet |
 | Search Google | `camofox_client.py` | Camofox | JSON: title, url, snippet |
 | Search Google + DuckDuckGo | `camofox_client.py --engine` | Camofox | JSON: title, url, snippet |
 | Fetch Chinese platforms | `fetch_china.py` | Weibo/Bilibili/CSDN: Camofox; WeChat: None | JSON: full article content |
 | Analyze user profile | `x-profile-analyzer.py` | Camofox + LLM API | Markdown: MBTI, Big Five, topics |
+| Check version updates | `version_check.py` | None | Version check thread (silent background) |
 
 ## Quick Start
 
