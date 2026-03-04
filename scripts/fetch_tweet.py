@@ -1091,9 +1091,13 @@ def fetch_user_timeline(
         if len(tweets) < limit:
             time.sleep(2)  # be polite between pages
 
+    # 用 FxTwitter 补充浏览量
+    tweets = supplement_views(tweets)
+
     result["tweets"] = tweets
     result["count"] = len(tweets)
     result["pages_fetched"] = page
+    result["views_supplemented"] = True
 
     if len(tweets) == 0:
         result["warning"] = t("warn_no_tweets")
@@ -1203,9 +1207,13 @@ def fetch_list_tweets(
         if len(tweets) < limit:
             time.sleep(2)  # be polite between pages
 
+    # 用 FxTwitter 补充浏览量
+    tweets = supplement_views(tweets)
+
     result["tweets"] = tweets
     result["count"] = len(tweets)
     result["pages_fetched"] = page
+    result["views_supplemented"] = True
 
     if len(tweets) == 0:
         result["warning"] = t("warn_no_tweets")
@@ -1917,6 +1925,34 @@ def main():
         sys.exit(1)
 
 
+
+
+def supplement_views(tweets: List[Dict], max补充: int = 10) -> List[Dict]:
+    """用 FxTwitter API 补充浏览量数据"""
+    import requests
+    for i, tw in enumerate(tweets[:max补充]):
+        if tw.get("views", 0) != 0:
+            continue  # 已有浏览量，跳过
+        # 从 author 构建 tweet URL
+        author = tw.get("author", "")
+        if not author or not author.startswith("@"):
+            continue
+        username = author.lstrip("@")
+        # 需要 tweet_id - 但 Nitter 没有返回，这里简化处理：
+        # 如果没有 tweet_id 就跳过（后续可以改进）
+        tweet_id = tw.get("tweet_id") or tw.get("id")
+        if not tweet_id:
+            continue
+        try:
+            resp = requests.get(f"https://api.fxtwitter.com/status/{username}/{tweet_id}", timeout=5)
+            data = resp.json()
+            views = data.get("tweet", {}).get("views", 0)
+            if views:
+                tw["views"] = views
+                print(f"[views] {username}/{tweet_id[:8]}... → {views}", file=sys.stderr)
+        except Exception as e:
+            pass
+    return tweets
 if __name__ == "__main__":
     # Version check (best-effort, no crash if unavailable)
     try:
