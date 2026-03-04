@@ -56,7 +56,7 @@ _MESSAGES = {
             "参考: https://github.com/openclaw/camofox"
         ),
         "err_snapshot_failed": "无法从 Camofox 获取页面快照",
-        "err_mutually_exclusive": "错误：--user 和 --url 不能同时使用",
+        "err_mutually_exclusive": "错误：--user、--url、--article、--monitor 和 --list 不能同时使用",
         "err_no_input": "错误：请提供 --url 或 --user",
         "err_prefix": "错误：",
         # warning field values
