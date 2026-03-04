@@ -459,7 +459,7 @@ def _parse_stats_from_text(raw: str) -> tuple:
     # e.g. "我已经打通...  1   22  4,418"
     # Numbers may have commas (thousands separator)
     stat_match = re.search(
-        r"^(.*?)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)$",
+        r"^(.*?)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)\s*[^\d]*$",
         raw.rstrip(),
     )
     if stat_match:
@@ -470,7 +470,7 @@ def _parse_stats_from_text(raw: str) -> tuple:
 
     # Only 2 trailing numbers
     stat_match2 = re.search(
-        r"^(.*?)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)$",
+        r"^(.*?)\s{2,}(\d[\d,]*)\s{2,}(\d[\d,]*)\s*[^\d]*$",
         raw.rstrip(),
     )
     if stat_match2:
