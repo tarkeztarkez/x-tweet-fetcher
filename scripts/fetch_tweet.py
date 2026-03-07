@@ -759,9 +759,13 @@ def parse_timeline_snapshot(snapshot: str, limit: int = 20) -> List[Dict]:
             if q_entry:
                 entry["quoted_tweet"] = q_entry
 
-        # Deduplicate
-        key = (entry["author"], entry["text"][:80])
-        if not any((t["author"], t["text"][:80]) == key for t in tweets):
+        # Deduplicate - for retweets, include retweeted_by in key to preserve different retweeters
+        if entry.get("retweeted_by"):
+            # Retweets: key includes retweeted_by so different people retweeting same content aren't deduped
+            key = (entry["retweeted_by"], entry["text"][:80])
+        else:
+            key = (entry["author"], entry["text"][:80])
+        if not any((t.get("retweeted_by") or t["author"], t["text"][:80]) == key for t in tweets):
             tweets.append(entry)
 
     return tweets
@@ -1849,6 +1853,8 @@ def main():
                 print(t("err_prefix") + result["error"], file=sys.stderr)
                 sys.exit(1)
             replies = result.get("replies", [])
+            # 用 FxTwitter 补充浏览量
+            replies = supplement_views(replies)
             print(t("replies_header", url=args.url) + "\n")
             for idx, r in enumerate(replies, 1):
                 print(f"[{idx}] {r['author_name']} ({r['author']}) · {r.get('time_ago', '')}")
@@ -1859,6 +1865,10 @@ def main():
                 print(stats)
                 print()
         else:
+            # 用 FxTwitter 补充浏览量
+            if result.get("replies"):
+                result["replies"] = supplement_views(result["replies"])
+                result["views_supplemented"] = True
             print(json.dumps(result, ensure_ascii=False, indent=indent))
 
         if result.get("error"):
@@ -1928,7 +1938,7 @@ def main():
 
 
 
-def supplement_views(tweets: List[Dict], max补充: int = 10) -> List[Dict]:
+def supplement_views(tweets: List[Dict], max补充: int = 50) -> List[Dict]:
     """用 FxTwitter API 补充浏览量数据"""
     import requests
     for i, tw in enumerate(tweets[:max补充]):
@@ -1937,12 +1947,14 @@ def supplement_views(tweets: List[Dict], max补充: int = 10) -> List[Dict]:
         # 从 author 构建 tweet URL
         author = tw.get("author", "")
         if not author or not author.startswith("@"):
+            # 记录没有 author 的推文
+            print(f"[views] 跳过无 author: {tw.get('text', '')[:50]}...", file=sys.stderr)
             continue
         username = author.lstrip("@")
-        # 需要 tweet_id - 但 Nitter 没有返回，这里简化处理：
-        # 如果没有 tweet_id 就跳过（后续可以改进）
+        # 需要 tweet_id - 如果没有 tweet_id 就跳过并打日志
         tweet_id = tw.get("tweet_id") or tw.get("id")
         if not tweet_id:
+            print(f"[views] 跳过无 tweet_id: @{username} - {tw.get('text', '')[:50]}...", file=sys.stderr)
             continue
         try:
             resp = requests.get(f"https://api.fxtwitter.com/status/{tweet_id}", timeout=5)
