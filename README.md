@@ -1,108 +1,146 @@
-# x-tweet-fetcher
+<div align="center">
 
-Fetch tweets, comments, timelines, and articles from X/Twitter — **without login or API keys**.  
-Search WeChat articles, discover tweets by keyword, analyze user profiles.  
-One tool for global content intelligence.
+# 🦞 x-tweet-fetcher
 
-An [OpenClaw](https://github.com/openclaw/openclaw) skill. Zero dependencies for basic usage. Python 3.7+.
+**Fetch tweets, comments, timelines, and articles from X/Twitter — without login or API keys.**
 
-> **For AI Agents**: All scripts output structured JSON by default. Import as Python modules for direct integration. Exit codes are cron-friendly (0=nothing new, 1=new content found).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![OpenClaw Skill](https://img.shields.io/badge/OpenClaw-Skill-blue.svg)](https://github.com/openclaw/openclaw)
+[![Python 3.7+](https://img.shields.io/badge/Python-3.7+-green.svg)](https://www.python.org)
+[![GitHub stars](https://img.shields.io/github/stars/ythx-101/x-tweet-fetcher?style=social)](https://github.com/ythx-101/x-tweet-fetcher)
 
-## Capabilities
+*Zero config · Agent-first JSON output · Cron-friendly exit codes · WeChat + X in one tool*
 
-| Feature | Script | Dependencies | Output |
-|---------|--------|-------------|--------|
-| Fetch single tweet | `fetch_tweet.py` | None | JSON: text, stats, media, quotes |
-| Fetch reply comments | `fetch_tweet.py --replies` | Camofox | JSON: threaded comment tree |
-| Fetch user timeline | `fetch_tweet.py --user` | Camofox | JSON: tweet list with pagination |
-| Fetch X Articles | `fetch_tweet.py --article` | Camofox | JSON: full long-form text |
-| Fetch X Lists tweets | `fetch_tweet.py --list` | Camofox | JSON: tweet list with pagination |
-| Monitor @mentions | `fetch_tweet.py --monitor` | Camofox | JSON: new mentions since last check |
-| **Monitor @mentions via Nitter** | `x_mentions_nitter.py` | Camofox | JSON: new mentions (fast, real-time) |
-| **Search WeChat articles** | `sogou_wechat.py` | None | JSON: title, url, author, date |
-| **Discover tweets by keyword** | `x_discover.py` | None (DuckDuckGo) or Camofox | JSON: url, title, snippet |
-| Search Google | `camofox_client.py` | Camofox | JSON: title, url, snippet |
-| Search Google + DuckDuckGo | `camofox_client.py --engine` | Camofox | JSON: title, url, snippet |
-| Fetch Chinese platforms | `fetch_china.py` | Weibo/Bilibili/CSDN: Camofox; WeChat: None | JSON: full article content |
-| Analyze user profile | `x-profile-analyzer.py` | Camofox + LLM API | Markdown: MBTI, Big Five, topics |
-| Check version updates | `version_check.py` | None | Version check thread (silent background) |
+[Quick Start](#-quick-start) · [Capabilities](#-capabilities) · [Cron Integration](#-cron-integration) · [How It Works](#-how-it-works)
 
-## Quick Start
+</div>
+
+---
+
+## 😤 Problem
+
+```
+You: fetch that tweet for me
+AI:  I can't access X/Twitter. Please copy-paste the content manually.
+
+You: ...seriously?
+```
+
+X has no free API. Scraping gets you blocked. Browser automation is fragile.
+
+**x-tweet-fetcher** solves this: one command → structured JSON, ready for your agent to consume. No API keys, no login, no cookies.
+
+## 📊 What You Get
+
+| Feature | Zero Deps | With Camofox | Output |
+|---------|:---------:|:------------:|--------|
+| Single tweet | ✅ | — | text, stats, media, quotes |
+| Reply comments | — | ✅ | threaded comment tree |
+| User timeline | — | ✅ | paginated tweet list (up to 200) |
+| X Articles (long-form) | — | ✅ | full article text |
+| X Lists | — | ✅ | paginated tweet list |
+| @mentions monitor | — | ✅ | incremental new mentions |
+| WeChat article search | ✅ | — | title, url, author, date |
+| Tweet discovery | ✅ | optional | keyword search results |
+| Google search | — | ✅ | zero API key alternative |
+| Chinese platforms | partial | ✅ | Weibo/Bilibili/CSDN/WeChat |
+| User profile analysis | — | ✅ + LLM | MBTI, Big Five, topic graph |
+
+> **For AI Agents**: All output is structured JSON. Import as Python modules for direct integration. Exit codes are cron-friendly (`0`=nothing new, `1`=new content).
+
+## 🚀 Quick Start
+
+### 30 seconds (experienced users)
+
+```bash
+git clone https://github.com/ythx-101/x-tweet-fetcher.git
+python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123456"
+# Done. JSON output with text, likes, retweets, views, media URLs.
+```
 
 ### For Agents (Python import)
 
 ```python
-# Fetch a tweet
 from scripts.fetch_tweet import fetch_tweet
-tweet = fetch_tweet("https://x.com/user/status/123456")
-# Returns: {"text": "...", "likes": 91, "retweets": 23, "views": 14468, ...}
 
-# Search WeChat articles (no API key needed)
+# Fetch a tweet → structured data
+tweet = fetch_tweet("https://x.com/user/status/123456")
+# {"text": "...", "likes": 91, "retweets": 23, "views": 14468, ...}
+
+# Search WeChat articles (no API key)
 from scripts.sogou_wechat import sogou_wechat_search
 articles = sogou_wechat_search("AI Agent", max_results=10)
-# Returns: [{"title": "...", "url": "...", "author": "...", "date": "..."}, ...]
 
 # Discover tweets by keyword
 from scripts.x_discover import discover_tweets
 result = discover_tweets(["AI Agent", "automation"], max_results=5)
-# Returns: {"total_new": 3, "finds": [{"url": "...", "title": "...", "snippet": "..."}, ...]}
 
-# Search Google (via Camofox, no API key)
+# Google search via Camofox (no API key)
 from scripts.camofox_client import camofox_search
 results = camofox_search("fetch tweets without API key")
-# Also supports: camofox_search("query", engine="duckduckgo")
 ```
 
-### CLI Usage
+### CLI Examples
 
 ```bash
-# Fetch tweet (JSON)
-python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123456"
+# Single tweet (JSON)
+python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123"
 
-# Fetch tweet (human readable)
-python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123456" --text-only
+# Human-readable output
+python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123" --text-only
 
-# Search WeChat articles
-python3 scripts/sogou_wechat.py --keyword "AI Agent" --limit 10 --json
+# Reply comments (requires Camofox)
+python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123" --replies
 
-# Discover tweets
-python3 scripts/x_discover.py --keywords "AI Agent,LLM tools" --limit 5 --json
+# User timeline (up to 200 tweets, auto-pagination)
+python3 scripts/fetch_tweet.py --user elonmusk --limit 50
 
-# Fetch comments (requires Camofox)
-python3 scripts/fetch_tweet.py --url "https://x.com/user/status/123456" --replies
+# X Lists
+python3 scripts/fetch_tweet.py --list "https://x.com/i/lists/123456"
 
-# Monitor mentions (cron-friendly, exit code 1 = new mentions)
+# X Articles (long-form)
+python3 scripts/fetch_tweet.py --article "https://x.com/i/article/123"
+
+# Monitor @mentions (cron-friendly)
 python3 scripts/fetch_tweet.py --monitor @username
 
-# Fetch Chinese platforms (auto-detect: Weibo/Bilibili/CSDN/WeChat)
+# WeChat article search
+python3 scripts/sogou_wechat.py --keyword "AI Agent" --limit 10 --json
+
+# Discover tweets by keyword
+python3 scripts/x_discover.py --keywords "AI Agent,LLM tools" --limit 5 --json
+
+# Chinese platforms (auto-detect: Weibo/Bilibili/CSDN/WeChat)
 python3 scripts/fetch_china.py --url "https://mp.weixin.qq.com/s/..."
 
-# Google search (no API key)
+# Google search (zero API key)
 python3 scripts/camofox_client.py "OpenClaw AI agent"
-python3 scripts/camofox_client.py --engine duckduckgo "OpenClaw AI agent"
 
-# User profile analysis (MBTI/Big Five/topics)
+# User profile analysis
 python3 scripts/x-profile-analyzer.py --user elonmusk --count 100
 ```
 
-## Cron Integration
+## ⏰ Cron Integration
 
 All monitoring scripts use exit codes for automation:
-- `0` — No new content
-- `1` — New content found
-- `2` — Error
+
+| Exit Code | Meaning |
+|:---------:|---------|
+| `0` | No new content |
+| `1` | New content found |
+| `2` | Error |
 
 ```bash
 # Check mentions every 30 min
-*/30 * * * * python3 fetch_tweet.py --monitor @username --text-only || notify-send "New mentions!"
+*/30 * * * * python3 fetch_tweet.py --monitor @username || notify-send "New mentions!"
 
-# Discover new tweets daily
+# Discover tweets daily
 0 9 * * * python3 x_discover.py --keywords "AI Agent" --cache ~/.cache/discover.json --json >> ~/discoveries.jsonl
 ```
 
-## Camofox Setup (Optional)
+## 🔧 Camofox Setup (Optional)
 
-Required only for: comments, timelines, mentions monitoring, Google search, non-WeChat Chinese platforms.
+Required for: comments, timelines, mentions, Google search, non-WeChat Chinese platforms.
 
 ```bash
 # Option 1: OpenClaw plugin
@@ -115,27 +153,60 @@ cd camofox-browser && npm install && npm start  # Port 9377
 
 [Camofox](https://github.com/jo-inc/camofox-browser) is built on [Camoufox](https://camoufox.com) — a Firefox fork with C++ level fingerprint spoofing. Bypasses Google, Cloudflare, and most anti-bot detection.
 
-## How It Works
+## 📐 How It Works
 
-- **Basic tweets**: [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API (no auth needed)
-- **Comments/Timeline/Mentions**: Camofox browser rendering + parsing
-- **WeChat search**: Sogou WeChat search (direct HTTP, no browser needed)
-- **Tweet discovery**: DuckDuckGo search with Camofox Google fallback
+```
+                    ┌─────────────┐
+ --url              │  FxTwitter  │  ← Public API, no auth
+                    │  (free)     │
+                    └──────┬──────┘
+                           │ JSON
+┌──────────┐       ┌──────┴──────┐       ┌──────────┐
+│ --replies│       │             │       │  Agent   │
+│ --user   │──────▶│  Camofox    │──────▶│  (JSON)  │
+│ --monitor│       │  (browser)  │       │          │
+│ --list   │       └─────────────┘       └──────────┘
+└──────────┘
+                    ┌─────────────┐
+ --keyword          │ DuckDuckGo  │  ← No API key
+ sogou_wechat       │ Sogou       │
+                    └─────────────┘
+```
+
+- **Basic tweets**: [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API (no auth)
+- **Comments/Timeline/Mentions**: Camofox headless Firefox + Nitter parsing
+- **Views supplement**: FxTwitter API auto-fills view counts missing from Nitter
+- **WeChat search**: Sogou search (direct HTTP, no browser)
+- **Tweet discovery**: DuckDuckGo with Camofox Google fallback
 - **Chinese platforms**: Direct HTTP for WeChat; Camofox for others
 
-## Use Cases
+## 📦 Requirements
 
-- **Content monitoring**: Track mentions, discover trending topics, monitor competitors
-- **Research**: Analyze user profiles, collect tweet datasets, search WeChat articles
-- **Automation**: Cron-based monitoring with structured JSON output for downstream processing
-- **Multi-language intelligence**: English (X/Twitter) + Chinese (WeChat/Weibo/Bilibili/CSDN) in one tool
+| | Required | Optional |
+|--|----------|----------|
+| **Runtime** | Python 3.7+ | — |
+| **Basic tweets** | Nothing else | — |
+| **Advanced features** | [Camofox](https://github.com/jo-inc/camofox-browser) | `duckduckgo-search` (pip) |
+| **Profile analysis** | Camofox + LLM API key | — |
 
-## Requirements
+## 🤝 Contributing
 
-- Python 3.7+
-- **Camofox** (optional, for advanced features)
-- `duckduckgo-search` (optional, for tweet discovery without Camofox)
+Issues and PRs welcome! Especially:
 
-## License
+- 🐛 Parsing edge cases (new Nitter layouts, X Article formats)
+- 🌍 New platform support (Threads, Mastodon, etc.)
+- 📊 Performance improvements for large-scale fetching
 
-MIT
+## 📄 License
+
+[MIT](LICENSE)
+
+---
+
+<div align="center">
+
+*Built for AI agents. Used by [OpenClaw](https://github.com/openclaw/openclaw) 🦞*
+
+**[GitHub](https://github.com/ythx-101/x-tweet-fetcher)** · **[Issues](https://github.com/ythx-101/x-tweet-fetcher/issues)** · **[OpenClaw Q&A](https://github.com/ythx-101/openclaw-qa)**
+
+</div>
