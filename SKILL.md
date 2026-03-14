@@ -5,11 +5,12 @@ description: >
   Also supports Chinese platforms (Weibo, Bilibili, CSDN, WeChat).
   Includes camofox_search() for zero-cost Google search without API keys.
   Basic tweet fetching: zero dependencies. Replies/timelines/search: requires Camofox.
+  NEW: X-Tracker for tweet growth monitoring with burst detection.
 ---
 
 # X Tweet Fetcher
 
-Fetch tweets from X/Twitter without authentication. Supports tweet content, reply threads, user timelines, and Chinese platforms.
+Fetch tweets from X/Twitter without authentication. Supports tweet content, reply threads, user timelines, Chinese platforms, and tweet growth tracking.
 
 ## Feature Overview
 
@@ -20,6 +21,7 @@ Fetch tweets from X/Twitter without authentication. Supports tweet content, repl
 | User timeline | `--user <username> --limit 300` | **Camofox** |
 | Chinese platforms | `fetch_china.py --url <url>` | **Camofox** (except WeChat) |
 | Google search | `camofox_search("query")` | **Camofox** |
+| **X-Tracker** (growth) | `tweet_growth_cli.py --add/--run/--report` | None (zero deps) |
 
 ---
 
@@ -237,9 +239,69 @@ x-tweet-fetcher/
 - **Advanced**: Camofox running on localhost:9377
 - **Profile Analyzer**: MiniMax M2.5 API key (for AI analysis)
 
+---
+
+## X-Tracker: Tweet Growth Monitoring
+
+Track your tweets' growth and detect viral moments — inspired by semiconductor ETCH Endpoint Detection.
+
+### Quick Start
+
+```bash
+# Add a tweet to track
+python3 scripts/tweet_growth_cli.py --add "https://x.com/user/status/123" "my launch tweet"
+
+# List all tracked tweets
+python3 scripts/tweet_growth_cli.py --list
+
+# Run sampling (new tweets <48h, every 15min)
+python3 scripts/tweet_growth_cli.py --run --fast
+
+# Run sampling (all tweets, hourly)
+python3 scripts/tweet_growth_cli.py --run --normal
+
+# Generate analysis report
+python3 scripts/tweet_growth_cli.py --report 123456789
+
+# Report with topic cross-analysis
+python3 scripts/tweet_growth_cli.py --report 123456789 --cross
+```
+
+### Cron Integration
+
+```bash
+# Dual-frequency sampling
+*/15 * * * * python3 tweet_growth_cli.py --run --fast    # New tweets (<48h)
+0 * * * *    python3 tweet_growth_cli.py --run --normal  # All tweets (hourly)
+```
+
+### Detection Algorithm
+
+| Component | Method | Purpose |
+|-----------|--------|---------|
+| **Derivative detection** | dV/dt per hour | Spot sudden acceleration |
+| **Sliding window** | 5-sample moving average | Filter noise |
+| **Multi-signal fusion** | views×1 + likes×1 + bookmarks×1.5 + RT×3 | Weighted composite score |
+| **Burst confirmation** | 3 consecutive windows above threshold | Prevent false positives |
+| **Surge override** | Single window +100%/h | Catch massive spikes |
+| **Saturation** | 6 samples < 2%/h growth | Detect long tail |
+| **Propagation** | RT-per-1k-views ratio | Influencer vs algorithm driven |
+
+### Output Example
+
+```
+🎯 Burst detected at 2026-03-14 08:45
+   - Growth rate: 156%/h
+   - Composite score: +2847 (views +1200, RT +89, likes +234)
+   - Propagation: 12.3 RT/1k views (influencer-driven)
+```
+
+---
+
 ## How It Works
 
 - **Basic tweets**: [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API
 - **Replies/timelines**: Camofox → Nitter (privacy-respecting X frontend)
 - **Chinese platforms**: Camofox renders JS → extracts content
 - **Google search**: Camofox opens Google → parses results
+- **X-Tracker**: FxTwitter API + derivative detection + burst confirmation
