@@ -1286,12 +1286,13 @@ class XiaohongshuParser(PlatformParser):
     def _fetch_via_router(self, url: str) -> Optional[str]:
         """Fetch page HTML via router's home IP (bypasses geo-block)."""
         import subprocess
+        import shlex
         cmd_queue = "/root/router-agent/cmd-queue"
         cmd_output = "/root/router-agent/cmd-output"
         
         # Write curl command to router queue
         curl_cmd = (
-            f'curl -sL "{url}" '
+            f'curl -sL {shlex.quote(url)} '
             f'-H "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
             f'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" '
             f'-H "Accept: text/html" '
@@ -1301,7 +1302,7 @@ class XiaohongshuParser(PlatformParser):
         
         try:
             # Clear old output
-            subprocess.run(['bash', '-c', f'> {cmd_output}'], timeout=3)
+            open(cmd_output, 'w').close()
             # Queue command
             with open(cmd_queue, 'w') as f:
                 f.write(curl_cmd)

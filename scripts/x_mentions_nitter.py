@@ -17,12 +17,13 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills/our/x-tweet-fetcher/scripts'))
 from camofox_client import camofox_fetch_page
 
-USERNAME = "YuLin807"
+USERNAME = os.environ.get("NITTER_USERNAME", "YuLin807")
+NITTER_HOST = os.environ.get("NITTER_HOST", "nitter.net")
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 os.makedirs(CACHE_DIR, exist_ok=True)
 CACHE_FILE = os.path.join(CACHE_DIR, "x-mentions-nitter-cache.json")
 RESULT_FILE = os.path.join(CACHE_DIR, "x-mentions-nitter-latest.json")
-NITTER_URL = f"https://nitter.net/search?f=tweets&q=%40{USERNAME}"
+NITTER_URL = f"https://{NITTER_HOST}/search?f=tweets&q=%40{USERNAME}"
 
 def parse_mentions(snapshot):
     """从 Nitter 快照中解析 mentions"""

@@ -22,6 +22,7 @@ from urllib.parse import quote
 import re
 import json
 import argparse
+import shlex
 import sys
 import os
 import html as html_lib
@@ -38,6 +39,11 @@ def sogou_wechat_search_via_router(keyword, max_results=10):
     queue_file = os.environ.get("ROUTER_CMD_QUEUE", "/root/router-agent/cmd-queue")
     result_file = os.environ.get("ROUTER_CMD_RESULT", "/root/router-agent/cmd-result")
     output_file = os.environ.get("ROUTER_CMD_OUTPUT", "/root/router-agent/cmd-output")
+
+    for path_var in (queue_file, result_file, output_file):
+        if not os.path.isabs(path_var) or '..' in path_var:
+            print(f"Invalid router path: {path_var}", file=sys.stderr)
+            return sogou_wechat_search(keyword, max_results)
     
     # Mark current result file position
     try:
@@ -49,7 +55,8 @@ def sogou_wechat_search_via_router(keyword, max_results=10):
     
     # Queue the curl command — router will fetch raw HTML
     encoded_kw = quote(keyword)
-    cmd = f'curl -s "https://weixin.sogou.com/weixin?type=2&query={encoded_kw}" -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"'
+    search_url = f'https://weixin.sogou.com/weixin?type=2&query={encoded_kw}'
+    cmd = f'curl -s {shlex.quote(search_url)} -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"'
     
     with open(queue_file, 'w') as f:
         f.write(cmd)
@@ -106,13 +113,20 @@ def _parse_sogou_html(text, max_results=10):
             article_url = 'https://weixin.sogou.com' + article_url
         results.append({'title': title, 'url': article_url, 'author': author, 'snippet': snippet, 'date': date})
     return results
+
+
+def sogou_wechat_search_via_ssh(keyword, max_results=10, ssh_host=None):
     """Search Sogou WeChat via SSH proxy to avoid IP bans.
-    
+
     Requires: SOGOU_SSH_HOST env var or ssh_host param (e.g. user@host).
     """
     host = ssh_host or os.environ.get("SOGOU_SSH_HOST")
     if not host:
         print("SOGOU_SSH_HOST not set, falling back to direct", file=sys.stderr)
+        return sogou_wechat_search(keyword, max_results)
+
+    if not re.match(r'^[\w.-]+@[\w.-]+$', host):
+        print(f"Invalid SSH host format: {host}", file=sys.stderr)
         return sogou_wechat_search(keyword, max_results)
 
     script = f'''
@@ -147,12 +161,12 @@ print(json.dumps(results, ensure_ascii=False))
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(script)
             local_path = f.name
-        
+
         remote_path = "/tmp/_sogou_search.py"
         subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", local_path, f"{host}:{remote_path}"],
                        capture_output=True, timeout=10)
         os.unlink(local_path)
-        
+
         result = subprocess.run(
             ["ssh", "-o", "ConnectTimeout=5", host, "python3", remote_path],
             capture_output=True, text=True, timeout=30

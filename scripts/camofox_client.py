@@ -7,6 +7,7 @@ Used by fetch_tweet.py and fetch_china.py.
 """
 
 import json
+import secrets
 import sys
 import time
 import urllib.request
@@ -27,6 +28,9 @@ def check_camofox(port: int = 9377) -> bool:
 
 def camofox_open_tab(url: str, session_key: str, port: int = 9377) -> Optional[str]:
     """Open a new Camofox tab; return tabId or None."""
+    if not url.startswith(('http://', 'https://')):
+        print(f"[Camofox] rejected non-HTTP URL: {url[:60]}", file=sys.stderr)
+        return None
     try:
         payload = json.dumps({
             "userId": "x-tweet-fetcher",
@@ -103,13 +107,13 @@ def camofox_search(query: str, num: int = 10, lang: str = "zh-CN", engine: str =
     
     if engine == "duckduckgo":
         search_url = f"https://duckduckgo.com/?q={encoded}&kl={lang}&t=h_"
-        snapshot = camofox_fetch_page(search_url, f"ddg-{int(time.time())}", wait=5, port=port)
+        snapshot = camofox_fetch_page(search_url, f"ddg-{secrets.token_hex(8)}", wait=5, port=port)
         if not snapshot:
             return []
         return _parse_duckduckgo_results(snapshot, num)
     else:
         search_url = f"https://www.google.com/search?q={encoded}&hl={lang}&num={num}"
-        snapshot = camofox_fetch_page(search_url, f"search-{int(time.time())}", wait=4, port=port)
+        snapshot = camofox_fetch_page(search_url, f"search-{secrets.token_hex(8)}", wait=4, port=port)
         if not snapshot:
             return []
         return _parse_google_results(snapshot)

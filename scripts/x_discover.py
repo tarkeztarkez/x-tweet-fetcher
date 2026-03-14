@@ -53,7 +53,7 @@ def search_web(query, max_results=5, timelimit=None):
 
 
 def url_hash(url):
-    return hashlib.md5(url.encode()).hexdigest()[:12]
+    return hashlib.sha256(url.encode()).hexdigest()[:12]
 
 
 def load_cache(cache_file):
