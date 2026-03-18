@@ -321,7 +321,6 @@ def cross_analyze_burst(record: dict, burst: dict) -> dict:
     result = discover_tweets(
         keywords=keywords,
         max_results=CROSS_SEARCH_RESULTS,
-        timelimit=timelimit,
         cache_file=str(DISCOVER_CACHE),
     )
 

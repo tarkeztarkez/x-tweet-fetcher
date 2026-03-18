@@ -108,7 +108,9 @@ If unsure, mark fresh=true. Be strict only on obviously old content."""
         # Extract JSON from response (may have markdown wrapping)
         text = ai_response
         if "```" in text:
-            text = text.split("```")[1]
+            parts = text.split("```")
+            if len(parts) > 1:
+                text = parts[1]
             if text.startswith("json"):
                 text = text[4:]
         text = text.strip()
@@ -122,7 +124,7 @@ If unsure, mark fresh=true. Be strict only on obviously old content."""
             v = verdict_map.get(i + 1, {})
             f["verified"] = v.get("fresh", None)
             f["freshness_note"] = v.get("reason", "no verdict")
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
         print(f"⚠ Could not parse AI verification: {e}", file=sys.stderr)
         for f in finds:
             f["verified"] = None
