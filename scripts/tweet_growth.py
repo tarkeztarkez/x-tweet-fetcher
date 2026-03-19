@@ -30,7 +30,7 @@ from growth_config import (
     CROSS_SEARCH_RESULTS, CROSS_TIME_WINDOW_H,
 )
 
-FXTWITTER_API = "https://api.fxtwitter.com/status/{tweet_id}"
+FXTWITTER_API = "https://api.fxtwitter.com/i/status/{tweet_id}"
 
 
 # ─── 数据层（带文件锁，防止双频 cron 同时写入冲突）────────────────────────────
@@ -474,7 +474,7 @@ def generate_report(tweet_id: str, record: dict, cross_analysis: bool = False) -
         "═" * 50,
         f"  推文增长报告：{label}",
         f"  ID: {tweet_id}",
-        f"  生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"  生成时间：{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC",
         "═" * 50,
     ]
 

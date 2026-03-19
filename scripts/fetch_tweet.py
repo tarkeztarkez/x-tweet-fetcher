@@ -1961,7 +1961,7 @@ def supplement_views(tweets: List[Dict], max补充: int = 50) -> List[Dict]:
             print(f"[views] 跳过无 tweet_id: @{username} - {tw.get('text', '')[:50]}...", file=sys.stderr)
             continue
         try:
-            resp = requests.get(f"https://api.fxtwitter.com/status/{tweet_id}", timeout=5)
+            resp = requests.get(f"https://api.fxtwitter.com/{username}/status/{tweet_id}", timeout=5)
             data = resp.json()
             views = data.get("tweet", {}).get("views", 0)
             if views:
