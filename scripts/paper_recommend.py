@@ -35,7 +35,8 @@ from common import (
     normalize_name, match_name_parts, match_github_to_author,
     GITHUB_REPO_RE, ARXIV_URL_RE, ARXIV_ID_RE,
 )
-from config import OPENALEX_API, OPENALEX_EMAIL, OPENALEX_DELAY, MAC_BRIDGE
+from config import OPENALEX_API, OPENALEX_EMAIL, OPENALEX_DELAY
+from arxiv_author_finder import ArxivAuthorFinder
 
 
 # ─── OpenAlex helpers ────────────────────────────────────────────────────────
@@ -218,18 +219,6 @@ def extract_from_tweet(tweet_url: str) -> dict | None:
                 text = fx_data.get("tweet", {}).get("text", "")
                 if text:
                     print("[INFO] Got tweet text via FxTwitter API", file=sys.stderr)
-        except Exception:
-            pass
-
-    # Method 3: Mac Bridge (configurable via XTF_MAC_BRIDGE env var)
-    if not text:
-        try:
-            bridge_url = f"{MAC_BRIDGE}/read?url={urllib.parse.quote(tweet_url)}&screens=1"
-            bridge_data = http_get(bridge_url, timeout=30)
-            if isinstance(bridge_data, dict):
-                text = bridge_data.get("text", "") or bridge_data.get("content", "")
-            elif isinstance(bridge_data, str):
-                text = bridge_data
         except Exception:
             pass
 
@@ -696,7 +685,6 @@ Examples:
         if arxiv_id:
             print("[INFO] Looking up source paper author Twitter...", file=sys.stderr)
             try:
-                from arxiv_author_finder import ArxivAuthorFinder
                 finder = ArxivAuthorFinder(skip_search=True)
                 finder_output = finder.find(arxiv_id)
                 for name, info in finder_output.get("results", {}).items():
@@ -707,9 +695,25 @@ Examples:
             except Exception as e:
                 print(f"[WARN] arxiv_author_finder failed: {e}", file=sys.stderr)
 
-        # 3b. Recommended paper authors — lightweight GitHub scraping
+        # 3b. Recommended paper authors — full finder for top papers, lightweight for rest
         if recommendations:
             print("[INFO] Looking up recommended paper author Twitter...", file=sys.stderr)
+            # Full ArxivAuthorFinder for top 3 recommended papers that have ArXiv IDs
+            top_with_arxiv = [p for p in recommendations if (p.get("externalIds") or {}).get("ArXiv")][:3]
+            for p in top_with_arxiv:
+                rec_arxiv = p["externalIds"]["ArXiv"]
+                try:
+                    rec_finder = ArxivAuthorFinder(skip_search=True)
+                    rec_output = rec_finder.find(rec_arxiv)
+                    for name, info in rec_output.get("results", {}).items():
+                        handle = info.get("handle", "")
+                        if name and handle and name not in twitter_map:
+                            twitter_map[name] = handle.lstrip("@")
+                            print(f"  [Twitter] {name} -> @{handle}", file=sys.stderr)
+                except Exception:
+                    pass
+
+            # Lightweight GitHub scraping for remaining authors
             all_authors = set()
             for p in recommendations:
                 for a in (p.get("authors") or [])[:2]:

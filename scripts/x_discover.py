@@ -19,118 +19,50 @@ import json
 import hashlib
 import argparse
 import sys
-import urllib.request
-import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from config import MAC_BRIDGE, GEMINI_SCRIPT
 from common import search_web
 
 
 def verify_freshness(finds, today_str=None):
     """
-    Batch-verify freshness of search results via AI (Gemini → Grok → ask-ai fallback).
-    One API call for all items. Returns finds with 'verified' and 'freshness_note' fields.
+    Verify freshness of search results using publishedDate heuristic.
+    Marks results as fresh/stale based on date metadata from search engine.
+    Returns finds with 'verified' and 'freshness_note' fields.
     """
     if not finds:
         return finds
-    
+
     if not today_str:
         today_str = datetime.now().strftime("%Y-%m-%d")
-    
-    # Build batch prompt
-    items_text = ""
-    for i, f in enumerate(finds):
-        items_text += f"{i+1}. Title: {f.get('title','')}\n   URL: {f.get('url','')}\n   Snippet: {f.get('snippet','')[:100]}\n\n"
-    
-    prompt = f"""Today is {today_str}. I have {len(finds)} search results that claim to be recent. 
-For each one, determine if it is genuinely from the last 24-48 hours or if it's older content.
 
-{items_text}
+    from datetime import timedelta
+    today = datetime.strptime(today_str, "%Y-%m-%d")
+    cutoff = today - timedelta(days=7)
 
-Reply ONLY with valid JSON array, no markdown. Format:
-[{{"index": 1, "fresh": true, "reason": "mentions GPT-5.4 released today"}}, ...]
-
-If unsure, mark fresh=true. Be strict only on obviously old content."""
-
-    # Chain: local Gemini (VPS) → Mac bridge → ask-ai
-    import subprocess
-    ai_response = None
-    
-    # 1. Local Gemini first (VPS direct, fastest & most reliable)
-    try:
-        if GEMINI_SCRIPT:
-            gemini_script = Path(GEMINI_SCRIPT)
-        else:
-            script_dir = Path(__file__).resolve().parent.parent.parent
-            gemini_script = script_dir / "gemini-chat" / "scripts" / "gemini_chat.py"
-        r = subprocess.run(
-            ["python3", str(gemini_script), prompt[:3000], "--model", "flash"],
-            capture_output=True, text=True, timeout=45
-        )
-        lines = r.stdout.strip().split("\n")
-        ai_response = "\n".join(l for l in lines if not l.startswith("[gemini]")).strip()
-        if ai_response:
-            print("✅ Verified via local Gemini", file=sys.stderr)
-    except Exception as e:
-        print(f"Local Gemini failed: {e}", file=sys.stderr)
-    
-    # 2. Mac bridge fallback (gemini/grok)
-    if not ai_response:
-        endpoint_params = {"/gemini": "prompt", "/grok": "message"}
-        for endpoint, param_key in endpoint_params.items():
-            try:
-                data = json.dumps({param_key: prompt}).encode()
-                req = urllib.request.Request(
-                    f"{MAC_BRIDGE}{endpoint}",
-                    data=data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    result = json.loads(resp.read())
-                    ai_response = result.get("output", result.get("response", result.get("message", "")))
-                    if ai_response:
-                        print(f"✅ Verified via bridge{endpoint}", file=sys.stderr)
-                        break
-            except Exception as e:
-                print(f"Bridge {endpoint} failed: {e}", file=sys.stderr)
-    
-    if not ai_response:
-        print("⚠ Verification failed: no AI backend available", file=sys.stderr)
-        for f in finds:
+    for f in finds:
+        pub_date = f.get("publishedDate", "")
+        if not pub_date:
+            # No date info — assume fresh (benefit of doubt)
             f["verified"] = None
-            f["freshness_note"] = "verification unavailable"
-        return finds
-    
-    # Parse AI response
-    try:
-        # Extract JSON from response (may have markdown wrapping)
-        text = ai_response
-        if "```" in text:
-            parts = text.split("```")
-            if len(parts) > 1:
-                text = parts[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
-        verdicts = json.loads(text)
-        
-        verdict_map = {}
-        for v in verdicts:
-            verdict_map[v.get("index", 0)] = v
-        
-        for i, f in enumerate(finds):
-            v = verdict_map.get(i + 1, {})
-            f["verified"] = v.get("fresh", None)
-            f["freshness_note"] = v.get("reason", "no verdict")
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
-        print(f"⚠ Could not parse AI verification: {e}", file=sys.stderr)
-        for f in finds:
+            f["freshness_note"] = "no date metadata"
+            continue
+
+        try:
+            # SearxNG returns ISO format like "2026-03-18T12:00:00+00:00"
+            date_str = pub_date[:10]
+            parsed = datetime.strptime(date_str, "%Y-%m-%d")
+            if parsed >= cutoff:
+                f["verified"] = True
+                f["freshness_note"] = f"published {date_str}"
+            else:
+                f["verified"] = False
+                f["freshness_note"] = f"stale: published {date_str}"
+        except (ValueError, IndexError):
             f["verified"] = None
-            f["freshness_note"] = f"parse error: {ai_response[:100]}"
-    
+            f["freshness_note"] = f"unparseable date: {pub_date[:20]}"
+
     return finds
 
 

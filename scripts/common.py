@@ -133,10 +133,37 @@ def fetch_arxiv_metadata(arxiv_id: str) -> dict | None:
     }
 
 
-# ─── GitHub scraping (zero API token needed) ─────────────────────────────────
+# ─── GitHub helpers (REST API when token available, HTML scraping as fallback)
+
+def _github_api_get(endpoint: str) -> dict | None:
+    """Call GitHub REST API. Returns parsed JSON or None."""
+    if not GITHUB_TOKEN:
+        return None
+    url = f"https://api.github.com{endpoint}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    result = http_get(url, headers=headers, timeout=10)
+    return result if isinstance(result, dict) else None
+
 
 def scrape_github_profile(username: str) -> dict | None:
-    """Scrape GitHub profile HTML for name + twitter handle."""
+    """Get GitHub profile (name + twitter). Uses REST API if token available, HTML scraping as fallback."""
+    # Try REST API first (stable, won't break on HTML changes)
+    api_data = _github_api_get(f"/users/{username}")
+    if api_data and api_data.get("login"):
+        twitter = api_data.get("twitter_username")
+        if twitter and twitter.lower() in TWITTER_SKIP_HANDLES:
+            twitter = None
+        return {
+            "login": api_data.get("login", username),
+            "name": api_data.get("name") or "",
+            "twitter": twitter,
+            "bio": api_data.get("bio") or "",
+        }
+
+    # Fallback: HTML scraping (zero token needed)
     html = http_get(f"https://github.com/{username}", timeout=10)
     if not isinstance(html, str):
         return None
@@ -154,7 +181,13 @@ def scrape_github_profile(username: str) -> dict | None:
 
 
 def scrape_repo_contributors(owner: str, repo: str) -> list[str]:
-    """Get contributor usernames from atom feed (no API needed)."""
+    """Get contributor usernames. Uses REST API if token available, atom feed as fallback."""
+    # Try REST API first
+    api_data = _github_api_get(f"/repos/{owner}/{repo}/contributors?per_page=10")
+    if isinstance(api_data, list) and api_data:
+        return [c.get("login", "") for c in api_data if c.get("login")][:10]
+
+    # Fallback: atom feed (zero token needed)
     atom = http_get(f"https://github.com/{owner}/{repo}/commits/HEAD.atom", timeout=10)
     if not isinstance(atom, str):
         atom = http_get(f"https://github.com/{owner}/{repo}/commits/main.atom", timeout=10)
@@ -171,7 +204,13 @@ def scrape_repo_contributors(owner: str, repo: str) -> list[str]:
 
 
 def is_github_org(owner: str) -> bool:
-    """Check if a GitHub owner is an org by scraping profile page."""
+    """Check if a GitHub owner is an org."""
+    # Try REST API first
+    api_data = _github_api_get(f"/users/{owner}")
+    if api_data and api_data.get("type"):
+        return api_data["type"] == "Organization"
+
+    # Fallback: HTML scraping
     html = http_get(f"https://github.com/{owner}", timeout=10)
     if not isinstance(html, str):
         return False
@@ -197,19 +236,23 @@ def match_name_parts(author_parts: list[str], target_name: str) -> bool:
     Prevents false positives like "Li Wei" matching "Weilin Chen".
 
     Each author name part must match a complete word in target.
-    For short parts (<=2 chars), ALL parts must match exactly.
+    For multi-part names: all parts must match as complete words (>= 2 parts).
+    For single-part names: the part must be >= 4 chars and match exactly.
     """
     target_parts = normalize_name(target_name).split()
     if not target_parts:
         return False
 
-    # For short names (like Chinese pinyin), require exact word match
     matched = 0
     for ap in author_parts:
         if any(ap == tp for tp in target_parts):
             matched += 1
 
-    # All parts must match as complete words
+    if len(author_parts) == 1:
+        # Single name (e.g. mononym): require exact word match + long enough to avoid false positives
+        return matched == 1 and len(author_parts[0]) >= 4
+
+    # Multi-part: all parts must match as complete words
     return matched == len(author_parts) and matched >= 2
 
 
@@ -376,6 +419,9 @@ if __name__ == '__main__':
     assert match_name_parts(["li", "wei"], "Li Wei") is True
     assert match_name_parts(["li", "wei"], "Weilin Chen") is False
     assert match_name_parts(["ashish", "vaswani"], "Ashish Vaswani") is True
+    # Single-name matching: >= 4 chars OK, < 4 chars rejected
+    assert match_name_parts(["hinton"], "Geoffrey Hinton") is True
+    assert match_name_parts(["li"], "Li Wei") is False  # too short, ambiguous
     print("  OK")
 
     print("=== All tests passed ===")
