@@ -815,7 +815,13 @@ def format_output(paper_info: dict, recommendations: list[dict], twitter_map: di
         if paper_info.get("arxiv_id"):
             lines.append(f"  ArXiv: https://arxiv.org/abs/{paper_info['arxiv_id']}")
         if paper_info.get("authors"):
-            lines.append(f"  Authors: {', '.join(paper_info['authors'][:5])}")
+            author_strs = []
+            for a in paper_info['authors'][:5]:
+                if a in twitter_map:
+                    author_strs.append(f"{a} (@{twitter_map[a]})")
+                else:
+                    author_strs.append(a)
+            lines.append(f"  Authors: {', '.join(author_strs)}")
         if paper_info.get("github_urls"):
             lines.append(f"  GitHub: {', '.join(paper_info['github_urls'])}")
 
@@ -840,7 +846,13 @@ def format_output(paper_info: dict, recommendations: list[dict], twitter_map: di
     if source_arxiv:
         lines.append(f"  🔗 arXiv: https://arxiv.org/abs/{source_arxiv}")
     if source_authors:
-        lines.append(f"  👥 作者: {', '.join(source_authors[:5])}")
+        author_strs = []
+        for a in source_authors[:5]:
+            if a in twitter_map:
+                author_strs.append(f"{a} (@{twitter_map[a]})")
+            else:
+                author_strs.append(a)
+        lines.append(f"  👥 作者: {', '.join(author_strs)}")
     if paper_info.get("github_urls"):
         lines.append(f"  💻 GitHub: {', '.join(paper_info['github_urls'])}")
 
@@ -912,26 +924,46 @@ Examples:
     if not recommendations:
         print("[WARN] No recommendations found", file=sys.stderr)
 
-    # Step 3: Find author Twitter handles (for recommended papers)
+    # Step 3: Find author Twitter handles
     twitter_map: dict[str, str] = {}
-    if not args.skip_twitter and recommendations:
-        print("[INFO] Looking up author Twitter accounts...", file=sys.stderr)
-        # Collect unique authors from recommendations
-        all_authors = set()
-        for p in recommendations:
-            for a in (p.get("authors") or [])[:2]:  # First 2 authors per paper
-                name = a.get("name", "")
-                if name and len(name) > 3:
-                    all_authors.add(name)
+    if not args.skip_twitter:
+        # 3a. Source paper authors — use arxiv_author_finder.py (full 4-layer pipeline)
+        arxiv_id = paper_info.get("arxiv_id")
+        if arxiv_id:
+            print("[INFO] Looking up source paper author Twitter (arxiv_author_finder)...", file=sys.stderr)
+            finder_script = os.path.join(os.path.dirname(__file__), "arxiv_author_finder.py")
+            if os.path.exists(finder_script):
+                try:
+                    cmd = ["python3", finder_script, "--arxiv", arxiv_id, "--json", "--skip-search"]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    if result.returncode == 0 and result.stdout.strip():
+                        finder_data = json.loads(result.stdout)
+                        for author_entry in finder_data.get("authors", []):
+                            name = author_entry.get("name", "")
+                            handle = author_entry.get("twitter", "")
+                            if name and handle:
+                                twitter_map[name] = handle.lstrip("@")
+                                print(f"  [Twitter] {name} -> @{handle}", file=sys.stderr)
+                except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
+                    print(f"[WARN] arxiv_author_finder failed: {e}", file=sys.stderr)
 
-        # Collect all GitHub URLs from source + recommendations
-        all_gh_urls = list(paper_info.get("github_urls", []))
+        # 3b. Recommended paper authors — lightweight GitHub scraping
+        if recommendations:
+            print("[INFO] Looking up recommended paper author Twitter...", file=sys.stderr)
+            all_authors = set()
+            for p in recommendations:
+                for a in (p.get("authors") or [])[:2]:
+                    name = a.get("name", "")
+                    if name and len(name) > 3 and name not in twitter_map:
+                        all_authors.add(name)
 
-        for author in list(all_authors)[:10]:  # Limit to 10 authors total
-            handle = find_author_twitter(author, all_gh_urls)
-            if handle:
-                twitter_map[author] = handle
-                print(f"  [Twitter] {author} -> @{handle}", file=sys.stderr)
+            all_gh_urls = list(paper_info.get("github_urls", []))
+
+            for author in list(all_authors)[:10]:
+                handle = find_author_twitter(author, all_gh_urls)
+                if handle:
+                    twitter_map[author] = handle
+                    print(f"  [Twitter] {author} -> @{handle}", file=sys.stderr)
 
     # Step 4: Output
     output = format_output(paper_info, recommendations, twitter_map,
