@@ -133,13 +133,16 @@ def fetch_arxiv_metadata(arxiv_id: str) -> dict | None:
         return None
 
     ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
-    root = ET.fromstring(raw)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return None
     entry = root.find("atom:entry", ns)
     if entry is None:
         return None
 
     title = (entry.findtext("atom:title", "", ns) or "").strip().replace("\n", " ")
-    authors = [a.findtext("atom:name", "", ns).strip() for a in entry.findall("atom:author", ns)]
+    authors = [s for a in entry.findall("atom:author", ns) if (s := (a.findtext("atom:name", "", ns) or "").strip())]
     abstract = (entry.findtext("atom:summary", "", ns) or "").strip()
 
     # Extract GitHub URLs

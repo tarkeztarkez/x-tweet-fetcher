@@ -16,6 +16,10 @@ Usage:
 
 环境变量：
   GITHUB_TOKEN — GitHub Personal Access Token（5000次/小时 vs 60次/小时）
+
+可选依赖：
+  duckduckgo_search — Layer 4 网络搜索的首选后端（pip install duckduckgo-search）。
+                      未安装时自动回退至本地 SearxNG（127.0.0.1:8080）。
 """
 
 import argparse
@@ -118,7 +122,10 @@ def fetch_arxiv_paper(arxiv_id: str) -> dict:
         "atom": "http://www.w3.org/2005/Atom",
         "arxiv": "http://arxiv.org/schemas/atom",
     }
-    root = ET.fromstring(raw)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise RuntimeError(f"Malformed XML from arxiv API for {arxiv_id}: {exc}") from exc
     entry = root.find("atom:entry", ns)
     if entry is None:
         raise RuntimeError(f"No arxiv entry found for ID: {arxiv_id}")
@@ -126,8 +133,8 @@ def fetch_arxiv_paper(arxiv_id: str) -> dict:
     title = (entry.findtext("atom:title", "", ns) or "").strip().replace("\n", " ")
     abstract = (entry.findtext("atom:summary", "", ns) or "").strip()
     authors = [
-        a.findtext("atom:name", "", ns).strip()
-        for a in entry.findall("atom:author", ns)
+        s for a in entry.findall("atom:author", ns)
+        if (s := (a.findtext("atom:name", "", ns) or "").strip())
     ]
 
     # Extract GitHub URLs from abstract + any comment field
