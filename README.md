@@ -46,6 +46,8 @@ X has no free API. Scraping gets you blocked. Browser automation is fragile.
 | Chinese platforms | partial | ✅ | Weibo/Bilibili/CSDN/WeChat |
 | User profile analysis | — | ✅ + LLM | MBTI, Big Five, topic graph |
 | **X-Tracker** (growth) | ✅ | — | burst detection, propagation analysis |
+| **Paper Recommend** | ✅ | — | related papers via Semantic Scholar |
+| **Author Finder** | ✅ | — | arxiv paper → author Twitter handles |
 
 > **For AI Agents**: All output is structured JSON. Import as Python modules for direct integration. Exit codes are cron-friendly (`0`=nothing new, `1`=new content).
 
@@ -276,6 +278,60 @@ cd camofox-browser && npm install && npm start  # Port 9377
 - **WeChat search**: Sogou search (direct HTTP, no browser)
 - **Tweet discovery**: DuckDuckGo with Camofox Google fallback
 - **Chinese platforms**: Direct HTTP for WeChat; Camofox for others
+
+## 📚 Academic Paper Mode
+
+Found a paper on X? Get related papers and author Twitter handles in one command.
+
+### Paper Recommendations
+
+```bash
+# From a tweet containing a paper link
+python3 scripts/paper_recommend.py --tweet "https://x.com/someone/status/123"
+
+# From ArXiv
+python3 scripts/paper_recommend.py --arxiv 1706.03762
+
+# From GitHub repo
+python3 scripts/paper_recommend.py --github "https://github.com/org/repo"
+
+# From paper title
+python3 scripts/paper_recommend.py --title "Attention Is All You Need"
+
+# Chinese output
+python3 scripts/paper_recommend.py --arxiv 1706.03762 --zh
+
+# JSON output
+python3 scripts/paper_recommend.py --arxiv 1706.03762 --json
+```
+
+Output: Top-N related papers with title, authors, citation count, abstract, and links — ranked by citations across references, cited-by, and same-author papers.
+
+### Author Twitter Finder
+
+```bash
+# Find paper authors' Twitter/X handles
+python3 scripts/arxiv_author_finder.py --arxiv 1706.03762
+
+# With verbose output
+python3 scripts/arxiv_author_finder.py --arxiv "https://arxiv.org/abs/2603.10165" --verbose
+```
+
+4-layer cascade: ArXiv API → GitHub profiles → Scholars dataset → Search engines.
+
+### APIs Used (all free, no key required)
+
+| API | Purpose | Key Required? |
+|-----|---------|:------------:|
+| ArXiv | Paper metadata | ❌ |
+| Semantic Scholar | Citations, recommendations | ❌ (optional key for higher rate limits) |
+| GitHub REST | Author Twitter lookup | ❌ (optional token for higher rate limits) |
+
+Optional environment variables for better performance:
+```bash
+export S2_API_KEY="your-key"       # https://semanticscholar.org/product/api
+export GITHUB_TOKEN="your-token"   # https://github.com/settings/tokens
+```
 
 ## 📦 Requirements
 
