@@ -200,18 +200,31 @@ def fetch_arxiv_paper(arxiv_id: str) -> dict:
 
 
 def search_github_for_paper(title: str, token: str | None = None) -> list[str]:
-    """Try to find a GitHub repo URL by searching for the paper title (HTML scraping)."""
+    """Try to find a GitHub repo URL by searching for the paper title."""
     query = urllib.parse.quote(f'"{title[:80]}"')
     url = f"https://github.com/search?q={query}&type=repositories"
     html = _get(url, timeout=15)
-    if not isinstance(html, str):
-        return []
-    # Extract repo URLs from search results
-    repos = re.findall(r'href="(/[^/]+/[^/"]+)"[^>]*data-testid="results-list"', html)
+    repos = []
+    if isinstance(html, str):
+        repos = re.findall(r'href="(/[^/]+/[^/"]+)"[^>]*data-testid="results-list"', html)
+        if not repos:
+            repos = re.findall(r'href="/([^/]+/[^/"]+)" data-hydro-click', html)
+
+    # Camofox fallback if direct scraping fails (429 or no results)
     if not repos:
-        # Fallback: look for repo links in search page
-        repos = re.findall(r'href="/([^/]+/[^/"]+)" data-hydro-click', html)
-    return [f"https://github.com{r}" if r.startswith('/') else f"https://github.com/{r}" for r in repos[:3]]
+        try:
+            from camofox_client import check_camofox, camofox_search
+            if check_camofox():
+                results = camofox_search(f'{title[:80]} github.com', num=5, engine="google")
+                for r in results:
+                    m = re.search(r'github\.com/([^/]+/[^/\s?"]+)', r.get("url", ""))
+                    if m:
+                        repos.append(m.group(0))
+        except Exception:
+            pass
+
+    return [f"https://{r}" if not r.startswith('http') else r
+            for r in [r.lstrip('/') for r in repos[:3]]]
 
 
 # ─── Layer 2: GitHub API ──────────────────────────────────────────────────────
@@ -570,6 +583,16 @@ def _search_web(query: str, max_results: int = 5) -> list[dict]:
         results = DDGS().text(query, max_results=max_results)
         if results:
             return results
+    except Exception:
+        pass
+
+    # 4. Camofox browser (fingerprint browser on Mac — zero 429, real user)
+    try:
+        from camofox_client import check_camofox, camofox_search
+        if check_camofox():
+            results = camofox_search(query, num=max_results, engine="google")
+            if results:
+                return results
     except Exception:
         pass
 
