@@ -223,7 +223,9 @@ def search_github_for_paper(title: str, token: str | None = None) -> list[str]:
         except Exception:
             pass
 
-    return [f"https://{r}" if not r.startswith('http') else r
+    return [r if r.startswith('http') else
+            f"https://{r}" if 'github.com' in r else
+            f"https://github.com/{r}"
             for r in [r.lstrip('/') for r in repos[:3]]]
 
 
