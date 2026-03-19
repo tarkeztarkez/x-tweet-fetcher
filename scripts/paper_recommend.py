@@ -104,7 +104,10 @@ def fetch_arxiv_metadata(arxiv_id: str) -> dict | None:
 
     ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
     try:
-        root = ET.fromstring(raw)
+        # Disable external entities (XXE protection)
+        parser = ET.XMLParser()
+        parser.feed(raw)
+        root = parser.close()
     except ET.ParseError:
         return None
     entry = root.find("atom:entry", ns)
@@ -569,12 +572,14 @@ def rank_and_dedupe(papers: list[dict], source_paper_id: str = None) -> list[dic
     unique = []
     for p in papers:
         pid = p.get("paperId")
-        if not pid or pid == source_paper_id or pid in seen:
+        # Use title as fallback dedup key if paperId is empty
+        dedup_key = pid or p.get("title", "").lower().strip()
+        if not dedup_key or dedup_key == source_paper_id or dedup_key in seen:
             continue
         title = p.get("title", "")
         if not title or len(title) < 5:
             continue
-        seen.add(pid)
+        seen.add(dedup_key)
         unique.append(p)
 
     # Sort by citation count (descending)
@@ -609,14 +614,24 @@ def _match_github_to_author(udata: dict, author_name: str) -> bool:
 
 def _scrape_github_twitter(username: str) -> str | None:
     """Scrape Twitter/X handle from a GitHub user's profile page (no API needed)."""
+    result = _scrape_github_twitter_with_name(username)
+    return result[0] if result else None
+
+
+def _scrape_github_twitter_with_name(username: str) -> tuple[str, str] | None:
+    """Scrape Twitter handle + display name from GitHub profile. Returns (handle, name) or None."""
     html = _get(f"https://github.com/{username}", timeout=10)
     if not isinstance(html, str):
         return None
-    # Look for twitter.com or x.com links in profile sidebar
-    m = re.search(r'href="https://(?:twitter\.com|x\.com)/(\w+)"', html)
+    handle = None
+    m = re.search(r'href="https://(?:twitter\.com|x\.com)/([\w.]+)"', html)
     if m and m.group(1).lower() not in ("home", "share", "intent", "i", "github"):
-        return m.group(1)
-    return None
+        handle = m.group(1)
+    if not handle:
+        return None
+    name_m = re.search(r'itemprop="name">([^<]+)<', html)
+    name = name_m.group(1).strip() if name_m else ""
+    return (handle, name)
 
 
 def _scrape_repo_contributors(owner: str, repo: str) -> list[str]:
@@ -661,15 +676,11 @@ def find_author_twitter(author_name: str, github_urls: list[str] | None = None) 
             contributors = _scrape_repo_contributors(owner, repo)
             for login in contributors[:5]:
                 # Scrape each contributor's profile for twitter
-                handle = _scrape_github_twitter(login)
-                if handle:
-                    # Verify name match by checking profile page
-                    html = _get(f"https://github.com/{login}", timeout=10)
-                    if isinstance(html, str):
-                        # Extract display name from profile
-                        name_m = re.search(r'itemprop="name">([^<]+)<', html)
-                        if name_m and _match_github_to_author({"name": name_m.group(1).strip(), "login": login}, author_name):
-                            return handle
+                result = _scrape_github_twitter_with_name(login)
+                if result:
+                    handle, profile_name = result
+                    if profile_name and _match_github_to_author({"name": profile_name, "login": login}, author_name):
+                        return handle
 
     return None
 
@@ -866,7 +877,8 @@ Examples:
     group.add_argument("--github", "-g", help="GitHub repo URL for the paper")
     group.add_argument("--arxiv", "-a", help="ArXiv ID or URL (e.g. 2603.10165)")
     group.add_argument("--title", help="Paper title to search for")
-    parser.add_argument("--top", "-n", type=int, default=5, help="Number of recommendations (default: 5)")
+    parser.add_argument("--top", "-n", type=int, default=5, choices=range(1, 21), metavar="N",
+                        help="Number of recommendations (1-20, default: 5)")
     parser.add_argument("--json", "-j", action="store_true", help="Output raw JSON")
     parser.add_argument("--zh", action="store_true", help="Simplified Chinese output")
     parser.add_argument("--skip-twitter", action="store_true", help="Skip Twitter lookup (faster)")
