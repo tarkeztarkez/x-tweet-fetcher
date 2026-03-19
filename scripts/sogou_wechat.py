@@ -17,7 +17,6 @@ Usage:
 Workflow: Sogou search → get titles → Google/DDG find real WeChat URL → fetch_china.py reads full text
 """
 
-import requests
 from urllib.parse import quote
 import re
 import json
@@ -183,7 +182,8 @@ print(json.dumps(results, ensure_ascii=False))
 
 def sogou_wechat_search(keyword, max_results=10):
     """搜索搜狗微信公众号文章"""
-    
+    import requests
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }

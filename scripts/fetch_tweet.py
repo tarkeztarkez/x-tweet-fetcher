@@ -1944,7 +1944,11 @@ def main():
 
 def supplement_views(tweets: List[Dict], max补充: int = 50) -> List[Dict]:
     """用 FxTwitter API 补充浏览量数据"""
-    import requests
+    try:
+        import requests
+    except ImportError:
+        print("[views] 'requests' not installed — skipping view supplementation", file=sys.stderr)
+        return tweets
     for i, tw in enumerate(tweets[:max补充]):
         if tw.get("views", 0) != 0:
             continue  # 已有浏览量，跳过
