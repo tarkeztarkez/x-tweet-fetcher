@@ -390,16 +390,51 @@ def _guess_github_usernames(author_name: str) -> list[str]:
     return unique
 
 
+def _github_user_search_html(author_name: str) -> str | None:
+    """Search GitHub users by name via HTML scraping. Slower but works on VPS."""
+    query = urllib.parse.quote(author_name)
+    url = f"https://github.com/search?q={query}&type=users"
+    html = _get(url, timeout=15)
+    if not isinstance(html, str) or len(html) < 1000:
+        return None
+    # Extract usernames from search results
+    logins = re.findall(r'href="/([a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,37})"[^>]*data-', html)
+    if not logins:
+        logins = re.findall(r'class="[^"]*"[^>]*href="/([a-zA-Z0-9_-]+)"', html)
+
+    skip = {"search", "features", "pricing", "login", "signup", "orgs", "topics", "settings", "explore"}
+    norm_author = _normalize_name(author_name)
+    author_parts = norm_author.split()
+
+    seen = set()
+    for login in logins:
+        if login in seen or login.lower() in skip:
+            continue
+        seen.add(login)
+        profile = _scrape_github_profile(login)
+        if not profile or not profile.get("name"):
+            continue
+        gh_name = _normalize_name(profile["name"])
+        if len(author_parts) >= 2 and all(p in gh_name for p in author_parts):
+            handle = extract_twitter_from_profile(profile)
+            if handle:
+                return handle
+        if len(seen) >= 3:  # Max 3 profiles per search
+            break
+    return None
+
+
 def search_github_users_for_author(author_name: str, token: str | None = None) -> str | None:
     """
-    Find an author's Twitter via GitHub profile guessing (no search API, no 429).
-    Directly probes plausible username URLs — profile pages are not rate-limited.
+    Find an author's Twitter: first guess profile URLs (fast, no rate limit),
+    then fall back to GitHub user search (slower, needs rate limit respect).
     Returns twitter handle or None.
     """
     parts = author_name.strip().split()
     if len(parts) < 2:
         return None
 
+    # Phase 1: Direct profile URL guessing (zero rate limit)
     guesses = _guess_github_usernames(author_name)
     norm_author = _normalize_name(author_name)
     author_parts = norm_author.split()
@@ -408,13 +443,18 @@ def search_github_users_for_author(author_name: str, token: str | None = None) -
         time.sleep(REQUEST_DELAY)
         profile = _scrape_github_profile(username)
         if not profile or not profile.get("name"):
-            continue  # 404 or no display name
+            continue
         gh_name = _normalize_name(profile["name"])
-        # Verify name matches
         if len(author_parts) >= 2 and all(p in gh_name for p in author_parts):
             handle = extract_twitter_from_profile(profile)
             if handle:
                 return handle
+
+    # Phase 2: GitHub user search (rate limited, but works for most users)
+    time.sleep(3)  # Respect rate limit
+    result = _github_user_search_html(author_name)
+    if result:
+        return result
 
     return None
 
