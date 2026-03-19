@@ -46,7 +46,7 @@ def http_get(url: str, headers: dict | None = None, timeout: int = 15) -> dict |
     req.add_header("User-Agent", "x-tweet-fetcher/1.0")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
+            raw = resp.read(10 * 1024 * 1024).decode("utf-8", errors="replace")
             try:
                 return json.loads(raw)
             except Exception:
@@ -343,8 +343,8 @@ def _brave_scrape_twitter(query: str) -> list[str]:
         clean = []
         for h in handles:
             h = h.lstrip('@')
-            if h.lower() not in TWITTER_SKIP_HANDLES and h not in seen and not h.isdigit() and len(h) > 1:
-                seen.add(h)
+            if h.lower() not in TWITTER_SKIP_HANDLES and h.lower() not in seen and not h.isdigit() and len(h) > 1:
+                seen.add(h.lower())
                 clean.append(h)
         return clean
     except urllib.error.HTTPError as e:

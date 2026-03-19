@@ -83,7 +83,7 @@ def main():
     snapshot = camofox_fetch_page(NITTER_URL, "nitter-mentions-check", wait=8)
     if not snapshot:
         print("❌ Nitter 无响应")
-        sys.exit(0)
+        sys.exit(1)
     
     mentions = parse_mentions(snapshot)
     print(f"📊 解析到 {len(mentions)} 条 mentions")

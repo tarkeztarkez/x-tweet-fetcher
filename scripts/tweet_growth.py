@@ -38,12 +38,22 @@ FXTWITTER_API = "https://api.fxtwitter.com/i/status/{tweet_id}"
 LOCK_FILE = DATA_FILE.with_suffix(".lock")
 
 
-def _acquire_lock():
-    """返回持有排他锁的文件对象，调用方负责关闭（即释放锁）"""
+def _acquire_lock(timeout: int = 30):
+    """返回持有排他锁的文件对象，调用方负责关闭（即释放锁）。
+    最多等待 timeout 秒；超时则抛出 TimeoutError。
+    """
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lf = open(LOCK_FILE, "w")
-    fcntl.flock(lf, fcntl.LOCK_EX)
-    return lf
+    lf = open(LOCK_FILE, "a")  # "a" avoids truncating the file on open
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lf
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                lf.close()
+                raise TimeoutError(f"Could not acquire lock on {LOCK_FILE} within {timeout}s")
+            time.sleep(0.5)
 
 
 def load_data() -> dict:

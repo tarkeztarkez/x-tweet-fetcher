@@ -69,7 +69,7 @@ def _check_update_worker(repo: str, version_file: str = None):
         req = urllib.request.Request(url, headers={"Accept": "application/vnd.github.v3+json"})
         
         with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
+            data = json.loads(resp.read(1024 * 1024).decode("utf-8", errors="replace"))
         
         remote_version = data.get("tag_name", "").lstrip("v")
         

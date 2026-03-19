@@ -161,13 +161,15 @@ print(json.dumps(results, ensure_ascii=False))
             f.write(script)
             local_path = f.name
 
-        remote_path = "/tmp/_sogou_search.py"
+        import uuid
+        remote_path = f"/tmp/_sogou_search_{uuid.uuid4().hex}.py"
         subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", local_path, f"{host}:{remote_path}"],
                        capture_output=True, timeout=10)
         os.unlink(local_path)
 
         result = subprocess.run(
-            ["ssh", "-o", "ConnectTimeout=5", host, "python3", remote_path],
+            ["ssh", "-o", "ConnectTimeout=5", host,
+             f"python3 {shlex.quote(remote_path)}; rm -f {shlex.quote(remote_path)}"],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0 and result.stdout.strip():
