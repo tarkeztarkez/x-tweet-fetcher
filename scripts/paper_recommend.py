@@ -65,7 +65,7 @@ def _get(url: str, headers: dict | None = None, timeout: int = 20) -> dict | str
     except urllib.error.HTTPError as e:
         if e.code == 429:
             print(f"[WARN] Rate limited (429), will retry with backoff", file=sys.stderr)
-            return None  # Signal to caller to retry
+            return "RATE_LIMITED"  # Signal to caller to retry
         if e.code != 404:
             print(f"[WARN] HTTP {e.code} — {url[:80]}", file=sys.stderr)
         return None
@@ -91,16 +91,20 @@ def _s2_get_with_backoff(path: str, params: str = "", retries: int = 3) -> dict 
         time.sleep(REQUEST_DELAY)
         result = _get(url, headers=headers if headers else None)
 
-        if result is not None:
-            return result if isinstance(result, dict) else None
-
-        if attempt < retries:
+        if isinstance(result, dict):
+            return result
+        if result is None:
+            # 404 or other non-retryable error — don't retry
+            return None
+        if result == "RATE_LIMITED" and attempt < retries:
             delay = 2 ** attempt  # 1, 2, 4 seconds
             print(f"[WARN] S2 request failed (attempt {attempt + 1}/{retries + 1}), "
                   f"retrying in {delay}s...", file=sys.stderr)
             time.sleep(delay)
-        else:
+        elif result == "RATE_LIMITED":
             print(f"[ERROR] S2 request failed after {retries + 1} attempts", file=sys.stderr)
+        else:
+            return None  # Non-dict, non-rate-limited response
 
     return None
 
@@ -201,26 +205,18 @@ def extract_from_tweet(tweet_url: str) -> dict | None:
     else:
         print(f"[WARN] fetch_tweet.py not found at {fetch_script}, trying fallbacks...", file=sys.stderr)
 
-    # ── Method 2: Nitter (public instances) ──────────────────────────────
+    # ── Method 2: FxTwitter API fallback ────────────────────────────────
     if not text:
-        nitter_urls = [
-            f"https://nitter.privacydev.net/{tweet_id}",
-            f"https://nitter.poast.org/{tweet_id}",
-            f"https://nitter.1d4.us/{tweet_id}",
-        ]
-        for nitter_url in nitter_urls:
-            try:
-                data = _get(nitter_url, timeout=10)
-                if isinstance(data, str) and len(data) > 100:
-                    # Extract text from nitter HTML
-                    m = re.search(r'class="tweet-content"[^>]*>([^<]+)', data)
-                    if m:
-                        text = m.group(1).strip()
-                    if text:
-                        print(f"[INFO] Got tweet text via nitter", file=sys.stderr)
-                        break
-            except Exception:
-                pass
+        try:
+            fx_url = f"https://api.fxtwitter.com/{tweet_id}"
+            fx_data = _get(fx_url, timeout=10)
+            if isinstance(fx_data, dict):
+                tweet_obj = fx_data.get("tweet", {})
+                text = tweet_obj.get("text", "")
+                if text:
+                    print(f"[INFO] Got tweet text via FxTwitter API", file=sys.stderr)
+        except Exception:
+            pass
 
     # ── Method 3: mac-bridge fallback ────────────────────────────────────
     if not text:
@@ -278,7 +274,7 @@ def extract_from_github(github_url: str) -> dict | None:
                     if github_url not in info.get("github_urls", []):
                         info.setdefault("github_urls", []).append(github_url)
                     return info
-            break
+            break  # README found (even without arxiv link), skip other branches
 
     # Check repo description via GitHub API
     api_url = f"https://api.github.com/repos/{owner}/{repo}"

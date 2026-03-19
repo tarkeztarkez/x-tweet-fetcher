@@ -368,14 +368,15 @@ def load_scholars_dataset(csv_path: str) -> dict[str, str]:
     try:
         with open(csv_path, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            headers = [h.lower().strip() for h in (reader.fieldnames or [])]
-            name_col = next((h for h in headers if "name" in h), None)
+            # Build column name mapping: original_header → lowercase for matching
+            orig_headers = list(reader.fieldnames or [])
+            name_col = next((h for h in orig_headers if "name" in h.lower()), None)
             handle_col = next(
-                (h for h in headers if "twitter" in h or "screen" in h or "handle" in h),
+                (h for h in orig_headers if any(k in h.lower() for k in ("twitter", "screen", "handle"))),
                 None
             )
             if not name_col or not handle_col:
-                print(f"[WARN] Cannot identify name/handle columns in {csv_path}. Headers: {headers}", file=sys.stderr)
+                print(f"[WARN] Cannot identify name/handle columns in {csv_path}. Headers: {orig_headers}", file=sys.stderr)
                 return {}
             for row in reader:
                 name = row.get(name_col, "").strip()
