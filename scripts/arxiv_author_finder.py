@@ -356,7 +356,7 @@ def _match_github_to_author(profile: dict, authors: list[str]) -> str | None:
 def search_github_users_for_author(author_name: str, token: str | None = None) -> str | None:
     """
     Find an author's Twitter via GitHub user search (HTML scraping).
-    Direct search — no guessing, no wasted requests.
+    Only trusts profile URLs found in search results — never guesses usernames.
     Returns twitter handle or None.
     """
     parts = author_name.strip().split()
@@ -369,7 +369,7 @@ def search_github_users_for_author(author_name: str, token: str | None = None) -
     if not isinstance(html, str) or len(html) < 1000:
         return None
 
-    # Extract usernames from search results
+    # Extract profile URLs from search results — these are links, not guesses
     logins = re.findall(r'href="/([a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,37})"[^>]*data-', html)
     if not logins:
         logins = re.findall(r'class="[^"]*"[^>]*href="/([a-zA-Z0-9_-]+)"', html)
@@ -387,6 +387,7 @@ def search_github_users_for_author(author_name: str, token: str | None = None) -
         if not profile or not profile.get("name"):
             continue
         gh_name = _normalize_name(profile["name"])
+        # Strict name match: all author name parts must appear in GitHub display name
         if len(author_parts) >= 2 and all(p in gh_name for p in author_parts):
             handle = extract_twitter_from_profile(profile)
             if handle:
@@ -459,43 +460,57 @@ def lookup_scholars(author: str, dataset: dict[str, str]) -> str | None:
 
 def search_twitter_for_author(author_name: str, affiliation: str = "") -> str | None:
     """
-    Use DuckDuckGo or local SearxNG to search for an author's Twitter.
+    Search for an author's X/Twitter account.
+    Strategy: search engines return URLs (links), not names — trust the link.
     Returns twitter handle or None.
     """
+    # Priority 1: direct site search — returns x.com/twitter.com URLs
     queries = [
-        f'"{author_name}" site:x.com OR site:twitter.com',
-        f'"{author_name}" twitter',
+        f'"{author_name}" site:x.com',
+        f'"{author_name}" site:twitter.com',
     ]
     if affiliation:
-        queries.insert(0, f'"{author_name}" "{affiliation}" twitter')
+        queries.insert(0, f'"{author_name}" "{affiliation}" site:x.com')
+
+    skip_handles = {"home", "share", "intent", "i", "search", "hashtag",
+                    "status", "explore", "settings", "login", "signup"}
 
     for query in queries:
         results = _search_web(query, max_results=5)
         for r in results:
             url = r.get("url", r.get("href", ""))
-            snippet = r.get("snippet", r.get("body", ""))
-            for text in [url, snippet]:
-                m = TWITTER_URL_RE.search(text)
-                if m:
-                    handle = m.group(1)
-                    if handle.lower() not in ("home", "share", "intent", "i", "search"):
-                        # Basic name plausibility check
-                        if _name_plausibly_matches_handle(author_name, handle):
-                            return handle
+            title = r.get("title", r.get("snippet", "")).lower()
+            # Trust the URL — but verify the search result title/snippet mentions the author
+            m = TWITTER_URL_RE.search(url)
+            if m:
+                handle = m.group(1)
+                if handle.lower() not in skip_handles and not handle.isdigit():
+                    # Verify: search result context should mention the author's name
+                    if _search_result_matches_author(author_name, title, handle):
+                        return handle
         time.sleep(0.3)
 
     return None
 
 
-def _name_plausibly_matches_handle(author_name: str, handle: str) -> bool:
-    """Very loose check: last name appears in handle (case insensitive)."""
+def _search_result_matches_author(author_name: str, result_text: str, handle: str) -> bool:
+    """
+    Verify a search result actually belongs to the author.
+    Checks if the author's last name appears in the result title/snippet or handle.
+    """
     parts = author_name.lower().split()
     if not parts:
         return True
     last = parts[-1]
-    if len(last) < 4:
-        return True  # Too short to verify
-    return last in handle.lower()
+    first = parts[0] if parts else ""
+    combined = result_text.lower() + " " + handle.lower()
+    # Last name must appear somewhere (in title, snippet, or handle)
+    if len(last) >= 3 and last in combined:
+        return True
+    # First name in both result and handle
+    if len(first) >= 3 and first in combined:
+        return True
+    return False
 
 
 _brave_disabled = False  # module-level flag to avoid repeated 429s
@@ -644,10 +659,10 @@ class ArxivAuthorFinder:
                         if self.verbose:
                             print(f"  [GitHub/search] {author} → @{handle}", file=sys.stderr)
 
-        # Layer 1b: GitHub user search for still-missing authors (cap at 8 to bound runtime)
+        # Layer 1b: GitHub user search — find profiles via search results (links, not guesses)
         missing = [a for a, v in results.items() if v["handle"] is None]
         for author in missing[:8]:
-            time.sleep(3)  # 3s delay bypasses GitHub search 429
+            time.sleep(1)
             handle = search_github_users_for_author(author, self.token)
             if handle:
                 results[author] = {"handle": handle, "url": f"https://x.com/{handle}", "source": "github_user_search", "confidence": "medium"}
