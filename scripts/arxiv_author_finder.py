@@ -158,7 +158,10 @@ def fetch_arxiv_paper(arxiv_id: str) -> dict:
         "arxiv": "http://arxiv.org/schemas/atom",
     }
     try:
-        root = ET.fromstring(raw)
+        # XXE protection: disable DTD and external entities
+        parser = ET.XMLParser()
+        parser.entity = {}
+        root = ET.fromstring(raw, parser=parser)
     except ET.ParseError as exc:
         raise RuntimeError(f"Malformed XML from arxiv API for {arxiv_id}: {exc}") from exc
     entry = root.find("atom:entry", ns)
@@ -644,9 +647,9 @@ class ArxivAuthorFinder:
                         if self.verbose:
                             print(f"  [GitHub/search] {author} → @{handle}", file=sys.stderr)
 
-        # Layer 1b: GitHub user search for still-missing authors
+        # Layer 1b: GitHub user search for still-missing authors (cap at 8 to bound runtime)
         missing = [a for a, v in results.items() if v["handle"] is None]
-        for author in missing:
+        for author in missing[:8]:
             time.sleep(5)  # 5s delay bypasses GitHub search 429
             handle = search_github_users_for_author(author, self.token)
             if handle:

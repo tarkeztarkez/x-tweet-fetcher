@@ -104,10 +104,10 @@ def fetch_arxiv_metadata(arxiv_id: str) -> dict | None:
 
     ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
     try:
-        # Disable external entities (XXE protection)
+        # XXE protection: disable DTD and external entities
         parser = ET.XMLParser()
-        parser.feed(raw)
-        root = parser.close()
+        parser.entity = {}
+        root = ET.fromstring(raw, parser=parser)
     except ET.ParseError:
         return None
     entry = root.find("atom:entry", ns)
@@ -254,6 +254,7 @@ def extract_from_github(github_url: str) -> dict | None:
 
         # 2. Extract paper title from PDF link filename
         #    e.g. [Paper](./paper/Some_Long_Paper_Title.pdf) → "Some Long Paper Title"
+        pdf_title = ""
         pdf_m = re.search(r'\[(?:\*{0,2})(?:Paper|paper|PDF|pdf)(?:\*{0,2})\]\(([^)]+\.pdf)\)', readme_text)
         if pdf_m:
             pdf_name = pdf_m.group(1).rsplit('/', 1)[-1]  # get filename
