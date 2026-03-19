@@ -208,7 +208,9 @@ def extract_from_tweet(tweet_url: str) -> dict | None:
     # ── Method 2: FxTwitter API fallback ────────────────────────────────
     if not text:
         try:
-            fx_url = f"https://api.fxtwitter.com/{tweet_id}"
+            username_m = re.search(r'(?:twitter\.com|x\.com)/([A-Za-z0-9_]+)/status/', tweet_url)
+            fx_username = username_m.group(1) if username_m else "i"
+            fx_url = f"https://api.fxtwitter.com/{fx_username}/status/{tweet_id}"
             fx_data = _get(fx_url, timeout=10)
             if isinstance(fx_data, dict):
                 tweet_obj = fx_data.get("tweet", {})

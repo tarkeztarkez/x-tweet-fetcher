@@ -32,7 +32,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -601,7 +601,7 @@ class ArxivAuthorFinder:
                 "found": found_count,
                 "total": total,
                 "coverage_pct": round(coverage, 1),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         }
 
