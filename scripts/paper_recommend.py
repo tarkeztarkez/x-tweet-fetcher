@@ -938,9 +938,8 @@ Examples:
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
                     if result.returncode == 0 and result.stdout.strip():
                         finder_data = json.loads(result.stdout)
-                        for author_entry in finder_data.get("authors", []):
-                            name = author_entry.get("name", "")
-                            handle = author_entry.get("twitter", "")
+                        for name, info in finder_data.get("results", {}).items():
+                            handle = info.get("handle", "")
                             if name and handle:
                                 twitter_map[name] = handle.lstrip("@")
                                 print(f"  [Twitter] {name} -> @{handle}", file=sys.stderr)
