@@ -611,7 +611,7 @@ def extract_article_title(html_content):
     return None
 
 
-def html_to_markdown(html_content, assets_dir, url, username, date_str, archive_time=None):
+def html_to_markdown(html_content, assets_dir, url, username, date_str, tags_line=None):
     assets_dir.mkdir(parents=True, exist_ok=True)
     cover_url = extract_cover_image(html_content)
     cover_local = download_image(cover_url, assets_dir) if cover_url else None
@@ -655,7 +655,8 @@ def html_to_markdown(html_content, assets_dir, url, username, date_str, archive_
         parts.append(f'![封面图](assets/{cover_local})\n')
     parts.append(f'> 来源：X @{username} | {date_str}')
     parts.append(f'> 链接：{url}')
-    parts.append('> 标签：TAGS_PLACEHOLDER\n')
+    if tags_line:
+        parts.append(f'{tags_line}\n')
     parts.append(body_md)
     return title, '\n'.join(parts)
 
@@ -679,7 +680,7 @@ def collect_images_from_json(tweet_data):
     return images
 
 
-def json_to_markdown(tweet_data, assets_dir, archive_time=None):
+def json_to_markdown(tweet_data, assets_dir, detect_code=False, tags_line=None):
     tweet = tweet_data.get('tweet', {})
     username = tweet_data.get('username') or tweet.get('screen_name', 'unknown')
     url = tweet_data.get('url', '')
@@ -728,7 +729,8 @@ def json_to_markdown(tweet_data, assets_dir, archive_time=None):
         parts.append(f'![封面图](assets/{cover_image})\n')
     parts.append(f'> 来源：X @{username} | {date_str}')
     parts.append(f'> 链接：{url}')
-    parts.append('> 标签：TAGS_PLACEHOLDER\n')
+    if tags_line:
+        parts.append(f'{tags_line}\n')
 
     if is_article and article.get('full_text'):
         article_body = article.get('full_text', '')
@@ -739,7 +741,8 @@ def json_to_markdown(tweet_data, assets_dir, archive_time=None):
             parts.append(article_body)
         else:
             # 无 fx_content - 使用纯文本，需要代码检测来包裹代码块
-            article_body = _detect_and_wrap_code_blocks(article_body)
+            if detect_code:
+                article_body = _detect_and_wrap_code_blocks(article_body)
             parts.append(article_body)
             for i, img_url in enumerate(all_images):
                 if i == 0 and cover_image:
@@ -777,7 +780,7 @@ def json_to_markdown(tweet_data, assets_dir, archive_time=None):
     return title, date_str, body
 
 
-def auto_toc(output_path):
+def auto_toc(output_path, has_leading_meta=False):
     print('\n📋 自动生成目录...')
     try:
         content = output_path.read_text(encoding='utf-8')
@@ -809,12 +812,12 @@ def auto_toc(output_path):
             indent = ' ' * (level - min_level)
             toc_lines.append(f'{indent}- [{text}](#{text})')
         toc = '\n'.join(toc_lines)
-        # insert after metadata/tag block (first blank line), otherwise top of file
         insert_at = 0
-        for i, line in enumerate(lines):
-            if line.strip() == '':
-                insert_at = i + 1
-                break
+        if has_leading_meta:
+            for i, line in enumerate(lines):
+                if line.strip() == '':
+                    insert_at = i + 1
+                    break
         new_lines = lines[:insert_at] + ['', toc, ''] + lines[insert_at:]
         new_content = re.sub(r'\n{3,}', '\n\n', '\n'.join(new_lines))
         output_path.write_text(new_content, encoding='utf-8')
@@ -881,6 +884,9 @@ def main():
     parser.add_argument('--username', help='作者用户名不含@（用--html时必填）')
     parser.add_argument('--date', help='推文日期 YYYY-MM-DD（用--html时可选）')
     parser.add_argument('--output', default='.', help='输出目录（默认当前目录）')
+    parser.add_argument('--tags-line', default='', help='optional tags/header line to insert near the top, e.g. "#tag1 #tag2"')
+    parser.add_argument('--detect-code', action='store_true', help='enable heuristic code block detection for plain-text article bodies')
+    parser.add_argument('--no-toc', action='store_true', help='do not auto-insert a table of contents')
     args = parser.parse_args()
 
     output_dir = Path(args.output).expanduser()
@@ -905,7 +911,7 @@ def main():
         print('📝 解析HTML，生成Markdown...')
         # 临时目录，后续重命名
         temp_assets_dir = output_dir / 'temp_assets'
-        title, md_content = html_to_markdown(html_content, temp_assets_dir, url=args.tweet_url, username=args.username, date_str=date_str, archive_time=None)
+        title, md_content = html_to_markdown(html_content, temp_assets_dir, url=args.tweet_url, username=args.username, date_str=date_str, tags_line=args.tags_line or None)
     else:
         if args.url:
             tweet_data = fetch_json(args.url, skill_dir)
@@ -918,7 +924,7 @@ def main():
         print('📝 生成Markdown（纯文本模式）...')
         # 临时目录，后续重命名
         temp_assets_dir = output_dir / 'temp_assets'
-        title, date_str, md_content = json_to_markdown(tweet_data, temp_assets_dir, archive_time=None)
+        title, date_str, md_content = json_to_markdown(tweet_data, temp_assets_dir, detect_code=args.detect_code, tags_line=args.tags_line or None)
 
     safe_title = sanitize_filename(title)
     # 文件名不包含日期前缀
@@ -946,7 +952,8 @@ def main():
     print(f'\n✅ 保存完成：{output_path}')
     print(f'📁 图片目录：{assets_subdir}')
 
-    auto_toc(output_path)
+    if not args.no_toc:
+        auto_toc(output_path, has_leading_meta=bool(args.tags_line))
 
 
 if __name__ == '__main__':
