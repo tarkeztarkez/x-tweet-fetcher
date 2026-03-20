@@ -45,6 +45,7 @@ X has no free API. Scraping gets you blocked. Browser automation is fragile.
 | Google search | — | ✅ | zero API key alternative |
 | Chinese platforms | partial | ✅ | Weibo/Bilibili/CSDN/WeChat |
 | Obsidian export (X → Markdown + local assets) | ✅ | ✅ | Markdown note + `assets/` folder |
+| **Paper → Obsidian** (arXiv) | ✅ | — | Markdown + figures + formulas + tables |
 | User profile analysis | — | ✅ + LLM | MBTI, Big Five, topic graph |
 | **X-Tracker** (growth) | ✅ | — | burst detection, propagation analysis |
 | **Paper Recommend** | ✅ | — | related papers via OpenAlex (250M+ papers) |
@@ -175,6 +176,46 @@ output/
 ```
 
 The exporter preserves source text as faithfully as possible, downloads images locally, and rewrites image references for direct use in Obsidian.
+
+### Paper → Obsidian (arXiv)
+
+Export arXiv papers as Obsidian-ready Markdown with all figures, LaTeX formulas, and tables preserved.
+
+```bash
+# From arXiv ID
+python3 scripts/paper_to_obsidian.py --arxiv 2401.02385 --output ./papers/
+
+# With custom tags
+python3 scripts/paper_to_obsidian.py --arxiv 1706.03762 --tags "transformer,attention" --output ./papers/
+
+# From ar5iv URL
+python3 scripts/paper_to_obsidian.py --url "https://ar5iv.labs.arxiv.org/html/2401.02385" --output ./papers/
+
+# From local HTML
+python3 scripts/paper_to_obsidian.py --html /tmp/paper.html --output ./papers/
+```
+
+Output:
+
+```text
+papers/
+├── Attention-Is-All-You-Need.md
+└── assets/
+    └── Attention-Is-All-You-Need/
+        ├── ModalNet-21.png
+        ├── ModalNet-20.png
+        └── x1.png
+```
+
+Features:
+- **YAML frontmatter**: title, authors, date, arxiv_id, tags
+- **Figures**: all images downloaded to local `assets/` directory
+- **Math**: LaTeX formulas preserved as `$...$` (inline) and `$$...$$` (block), renders natively in Obsidian
+- **Tables**: converted to Markdown tables
+- **References**: numbered bibliography list
+- **Auto TOC**: generated from section headings (disable with `--no-toc`)
+
+Uses ar5iv (LaTeXML HTML version of arXiv papers) + arXiv API for metadata. Zero dependencies beyond Python stdlib.
 
 ## ⏰ Cron Integration
 
