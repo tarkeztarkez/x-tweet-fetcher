@@ -11,7 +11,6 @@ x-mentions-nitter.py - 通过本地 Nitter 实例抓取 @mentions
 import sys
 import os
 import json
-import re
 from datetime import datetime
 
 _scripts_dir = os.path.dirname(os.path.abspath(__file__))

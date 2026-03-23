@@ -23,7 +23,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from html.parser import HTMLParser
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Config

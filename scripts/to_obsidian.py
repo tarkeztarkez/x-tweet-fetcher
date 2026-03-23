@@ -3,7 +3,7 @@
 to_obsidian.py - 把 X/Twitter 推文保存为 Obsidian Markdown
 
 支持两种输入：
-  A) Playwright HTML（推荐，格式完整，图片位置准确）
+  A) HTML（推荐，格式完整，图片位置准确）
   B) fetch_tweet.py JSON（纯文本，格式丢失）
 
 用法：

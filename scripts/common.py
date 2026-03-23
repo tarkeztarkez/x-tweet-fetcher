@@ -9,15 +9,12 @@ All functions are stateless and can be imported by any script.
 import json
 import re
 import sys
-import time
 import urllib.error
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-from config import (
-    ARXIV_API, SEARXNG_URL, GITHUB_TOKEN, REQUEST_DELAY,
-)
+from config import SEARXNG_URL
 
 # ─── Regex patterns ──────────────────────────────────────────────────────────
 

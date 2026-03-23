@@ -29,7 +29,7 @@ import argparse
 import urllib.request
 import urllib.error
 from datetime import datetime
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Optional, Dict, List, Tuple
 from pathlib import Path
 
 

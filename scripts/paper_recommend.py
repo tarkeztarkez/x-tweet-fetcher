@@ -33,7 +33,7 @@ from common import (
     http_get, parse_arxiv_id, fetch_arxiv_metadata, strip_arxiv_version,
     scrape_github_profile, scrape_repo_contributors, extract_twitter_from_profile,
     normalize_name, match_name_parts, match_github_to_author,
-    GITHUB_REPO_RE, ARXIV_URL_RE, ARXIV_ID_RE,
+    GITHUB_REPO_RE, ARXIV_URL_RE,
 )
 from config import OPENALEX_API, OPENALEX_EMAIL, OPENALEX_DELAY
 from arxiv_author_finder import ArxivAuthorFinder
