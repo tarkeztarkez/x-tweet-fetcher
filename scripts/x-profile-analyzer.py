@@ -147,7 +147,7 @@ def _fetch_user_timeline_nitter(username: str, count: int, verbose: bool) -> Tup
             "retweets": tw.get("retweets", 0),
             "replies": tw.get("replies", 0),
             "views": tw.get("views", 0),
-            "media": tw.get("media_urls", []) if tw.get("has_media") else [],
+            "media": tw.get("media_urls", []) if tw.get("media_urls") else [],
             "tweet_id": tw.get("tweet_id", ""),
             "url": tw.get("url", ""),
         })
@@ -341,7 +341,7 @@ def _build_tweets_summary(tweets: List[Dict]) -> str:
     for i, t in enumerate(tweets, 1):
         text = t["text"]
         stats = f"回复:{t['replies']} 转推:{t['retweets']} 浏览:{t['views']}"
-        has_media = "📷" if t.get("has_media") else ""
+        has_media = "📷" if bool(t.get("media")) else ""
         quoted = f"\n  > 引用: {t['quoted_text'][:100]}" if t.get("quoted_text") else ""
         parts.append(f"{i}. [{t['time']}] {has_media}{text[:300]}{quoted}\n   ({stats})")
     return "\n\n".join(parts)
@@ -406,41 +406,15 @@ def main():
     parser.add_argument("--no-analyze", action="store_true", help="只抓推文数据，不调 AI 分析（让调用方自己分析）")
     parser.add_argument("--verbose", "-v", action="store_true", help="显示详细进度信息")
     parser.add_argument("--legacy", action="store_true", help="跳过 Nitter 检查（调试用）")
-    parser.add_argument(
-        help=(
-            "抓取后端：nitter（直接 HTTP，无需浏览器）、"
-            "Nitter（HTTP 后端）、"
-            "auto（优先 Nitter，不可用则回退浏览器）[默认: auto]"
-        ),
-    )
     args = parser.parse_args()
 
     username = args.user.lstrip("@")
-    backend = getattr(args, "backend", "auto")
 
     # Nitter 直连模式：跳过 Nitter 检查
-    nitter_mode = (backend == "nitter") or (backend == "auto" and _check_nitter_local())
-
-    # 检查 Nitter 状态（仅在非 Nitter 模式下）
-    if not args.legacy and not nitter_mode:
-        try:
-            req = urllib.request.Request(f"http://localhost:{CAMOFOX_PORT}/")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                status = json.loads(resp.read().decode())
-            if not status.get("running"):
-                print(f"[Error] Nitter is not running. Start it first.", file=sys.stderr)
-                sys.exit(1)
-            if args.verbose:
-                print(f"[Nitter] Status: OK (browser connected: {status.get('browserConnected')})", file=sys.stderr)
-        except Exception as e:
-            print(f"[Error] Cannot connect to Nitter at port {CAMOFOX_PORT}: {e}", file=sys.stderr)
-            print("Make sure Nitter is running.", file=sys.stderr)
-            sys.exit(1)
-
     # 抓取推文
     print(f"📊 正在抓取 @{username} 的推文...", file=sys.stderr)
     try:
-        tweets, user_info = fetch_user_timeline(username, args.count, verbose=args.verbose, backend)
+        tweets, user_info = fetch_user_timeline(username, args.count, verbose=args.verbose)
     except RuntimeError as e:
         print(f"[Error] Failed to fetch tweets: {e}", file=sys.stderr)
         sys.exit(1)
@@ -492,7 +466,7 @@ def main():
     print(f"🤖 正在分析用户画像...", file=sys.stderr)
     try:
         analysis = analyze_profile_with_minimax(user_info, tweets, api_key, verbose=args.verbose,
-                                                 api_url=api_url, model_name=model_name, backend)
+                                                 api_url=api_url, model_name=model_name)
     except RuntimeError as e:
         print(f"[Error] Analysis failed: {e}", file=sys.stderr)
         sys.exit(1)

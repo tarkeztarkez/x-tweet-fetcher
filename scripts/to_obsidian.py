@@ -7,7 +7,7 @@ to_obsidian.py - 把 X/Twitter 推文保存为 Obsidian Markdown
   B) fetch_tweet.py JSON（纯文本，格式丢失）
 
 用法：
-  # 方式A：Playwright HTML（推荐）
+  # 方式A：HTML（推荐）
   python3 to_obsidian.py \
     --html /tmp/tweet_article.html \
     --tweet-url "https://x.com/yanhua1010/status/xxx" \
@@ -877,7 +877,7 @@ def fetch_json(tweet_url, skill_dir):
 def main():
     parser = argparse.ArgumentParser(description='把X推文保存为Obsidian Markdown')
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument('--html', help='Playwright抓取的HTML文件（推荐，格式完整）')
+    input_group.add_argument('--html', help='HTML文件（推荐，格式完整）')
     input_group.add_argument('--url', help='推文URL，自动调用fetch_tweet.py（纯文本）')
     input_group.add_argument('--json', help='已有的JSON文件（纯文本）')
     parser.add_argument('--tweet-url', help='推文原始URL（用--html时必填）')

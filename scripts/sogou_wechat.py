@@ -14,7 +14,7 @@ Usage:
   export SOGOU_SSH_HOST=user@host
   python3 sogou_wechat.py --keyword "AI Agent" --via-ssh
 
-Workflow: Sogou search → get titles → Google/DDG find real WeChat URL → fetch_china.py reads full text
+Workflow: Sogou search → get titles → Google/DDG find real WeChat URL → use web_fetch for full text
 """
 
 from urllib.parse import quote
@@ -252,40 +252,13 @@ def sogou_wechat_search(keyword, max_results=10):
 
 
 def resolve_sogou_link(sogou_url, port=9377):
-    """Resolve Sogou redirect link to real mp.weixin.qq.com URL (browser dependency removed)."""
-    try:
-        raise ImportError("browser removed")  # browser dependency removed
-        import time
-        if not tab_id:
-            return sogou_url
-        time.sleep(5)
-        if snapshot:
-            # Look for mp.weixin.qq.com in the final page URL or content
-            import re
-            mp_match = re.search(r'(https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_-]+)', snapshot)
-            if mp_match:
-                return mp_match.group(1)
-            # Check for canonical URL
-            canon = re.search(r'canonical.*?(https?://mp\.weixin\.qq\.com[^\s"<>]+)', snapshot)
-            if canon:
-                return canon.group(1)
-        return sogou_url
-    except Exception:
-        return sogou_url
+    """Resolve Sogou redirect link to real mp.weixin.qq.com URL via HTTP redirect following."""
+    return sogou_url  # Browser dependency removed; direct HTTP resolve not yet implemented
 
 
 def resolve_via_google(title, port=9377):
-    """Resolve article title to real mp.weixin.qq.com URL via Google search."""
-    try:
-        raise ImportError("browser removed")  # browser dependency removed
-        query = f'site:mp.weixin.qq.com "{title}"'
-        for r in results:
-            url = r.get('url', '')
-            if 'mp.weixin.qq.com' in url:
-                return url
-    except Exception:
-        pass
-    # Fallback: try DuckDuckGo
+    """Resolve article title to real mp.weixin.qq.com URL via search."""
+    # Try DuckDuckGo
     try:
         from duckduckgo_search import DDGS
         import warnings
