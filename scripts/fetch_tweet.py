@@ -266,6 +266,21 @@ def camofox_fetch_page(url: str, session_key: str, wait: float = 8, port: int = 
     return snapshot
 
 
+# --- Playwright override: prefer playwright_client if available ---
+try:
+    import os as _os, sys as _sys
+    _sd = _os.path.dirname(_os.path.abspath(__file__))
+    if _sd not in _sys.path:
+        _sys.path.insert(0, _sd)
+    from playwright_client import (
+        check_camofox, camofox_open_tab, camofox_snapshot,
+        camofox_close_tab, camofox_fetch_page,
+    )
+    _BROWSER_BACKEND = 'playwright'
+except ImportError:
+    _BROWSER_BACKEND = 'camofox'
+
+
 # ---------------------------------------------------------------------------
 # FxTwitter single-tweet fetch (zero deps)
 # ---------------------------------------------------------------------------
