@@ -2,16 +2,16 @@
 
 # 🦞 x-tweet-fetcher
 
-**Fetch tweets, timelines, and WeChat articles — zero browser dependency.**
+**Fetch tweets, lists, articles, and WeChat content — with smart backend routing.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![OpenClaw Skill](https://img.shields.io/badge/OpenClaw-Skill-blue.svg)](https://github.com/openclaw/openclaw)
 [![Python 3.7+](https://img.shields.io/badge/Python-3.7+-green.svg)](https://www.python.org)
 [![GitHub stars](https://img.shields.io/github/stars/ythx-101/x-tweet-fetcher?style=social)](https://github.com/ythx-101/x-tweet-fetcher)
 
-*Pure HTTP · Python stdlib only · Works everywhere (VPS / Mac / Windows / CI / Claude Code / OpenClaw)*
+*Three backends · Auto fallback · Works everywhere (VPS / Mac / Windows / CI / Claude Code / OpenClaw)*
 
-[Quick Start](#-quick-start) · [Capabilities](#-capabilities) · [Self-hosted Nitter](#-self-hosted-nitter-setup) · [Why Self-host](#-why-self-host) · [Claude Code & CC](#-works-with-claude-code--cc)
+[Quick Start](#-quick-start) · [Backends](#-three-backends) · [Capabilities](#-capabilities) · [Self-hosted Nitter](#-self-hosted-nitter-setup) · [Claude Code & CC](#-works-with-claude-code--cc)
 
 </div>
 
@@ -20,27 +20,51 @@
 ## 😤 Problem
 
 ```
-You: fetch that tweet for me
+You: fetch that tweet / list / article for me
 AI:  I can't access X/Twitter. Please copy-paste the content manually.
 
 You: ...seriously?
 ```
 
-X has no free API. Scraping gets you blocked. Browser automation is fragile and won't work in headless environments like Claude Code or CI/CD.
+X has no free API. Scraping gets you blocked. Browser automation is fragile and won't work in headless environments.
 
-**x-tweet-fetcher** solves this: one command → structured JSON, ready for your agent to consume. No API keys, no login, no cookies, **no browser**, **no pip install**.
+**x-tweet-fetcher** solves this with **smart backend routing**: Nitter for zero-dependency speed, Playwright for full-feature coverage, auto fallback between them.
+
+## 🔀 Three Backends
+
+```bash
+# Auto mode (default) — Nitter first, browser fallback
+python3 scripts/fetch_tweet.py --user elonmusk
+
+# Nitter only — zero dependency, no browser
+python3 scripts/fetch_tweet.py --user elonmusk --backend nitter
+
+# Browser only — full features (lists, articles)
+python3 scripts/fetch_tweet.py --list 1455045069516357634 --backend browser
+```
+
+| Backend | Deps | Speed | Features |
+|---------|------|-------|----------|
+| **nitter** | None (stdlib only) | ⚡ Fast | Timeline, search, replies, profile, mentions |
+| **browser** | Playwright/Chromium | 🐢 Slower | Everything above + **Lists** + **Articles** + **fetch_china** |
+| **auto** (default) | Best available | ⚡→🐢 | Tries nitter first, falls back to browser |
+
+> **OpenClaw users**: Playwright + Chromium are built-in. `--backend auto` just works — no extra install needed.
 
 ## 📊 Capabilities
 
-| Feature | Method | Output |
-|---------|--------|--------|
-| Single tweet | FxTwitter API | text, stats, media, quotes |
-| Reply comments | Self-hosted Nitter | threaded comment list |
-| User timeline | Self-hosted Nitter | paginated tweet list |
-| @mentions monitor | Self-hosted Nitter | incremental new mentions |
-| Keyword search | Self-hosted Nitter | real-time tweet stream |
-| User profile analysis | Nitter + LLM | MBTI, Big Five, topic graph |
+| Feature | Backend | Output |
+|---------|---------|--------|
+| Single tweet | FxTwitter (always) | text, stats, media, quotes |
+| Reply comments | nitter / browser | threaded comment list |
+| User timeline | nitter / browser | paginated tweet list |
+| @mentions monitor | nitter / browser | incremental new mentions |
+| Keyword search | nitter / browser | real-time tweet stream |
+| **X Lists** | **browser only** | list member tweets |
+| **X Articles** | **browser only** | full long-form content |
+| User profile analysis | nitter + LLM | MBTI, Big Five, topic graph |
 | WeChat article search | Sogou (direct HTTP) | title, url, author, date |
+| **WeChat/Weibo/Bilibili** | **browser only** | via fetch_china.py |
 | Tweet growth tracker | FxTwitter API | growth curves, burst detection |
 
 > **For AI Agents**: All output is structured JSON. Import as Python modules for direct integration. Exit codes are cron-friendly (`0`=nothing new, `1`=new content).
@@ -50,14 +74,14 @@ X has no free API. Scraping gets you blocked. Browser automation is fragile and 
 ### Single tweet (zero setup)
 
 ```bash
-# Works immediately — no Nitter needed
+# Works immediately — no Nitter, no browser needed
 python3 scripts/fetch_tweet.py --url https://x.com/elonmusk/status/123456789
 ```
 
-### Timeline, search, replies (needs self-hosted Nitter)
+### Timeline, search, replies
 
 ```bash
-# Set your Nitter instance URL
+# Set your Nitter instance URL (for nitter/auto mode)
 export NITTER_URL=http://127.0.0.1:8788
 
 # User timeline
@@ -74,40 +98,58 @@ python3 scripts/fetch_tweet.py --monitor @yourusername
 
 # User profile analysis
 python3 scripts/x-profile-analyzer.py --user elonmusk --count 100
+```
 
-# WeChat article search (no Nitter needed)
+### Lists & Articles (browser backend)
+
+```bash
+# X List — requires Playwright
+python3 scripts/fetch_tweet.py --list 1455045069516357634 --backend browser
+
+# X Article
+python3 scripts/fetch_tweet.py --article https://x.com/user/article/123 --backend browser
+
+# WeChat / Weibo / Bilibili
+python3 scripts/fetch_china.py --url "https://mp.weixin.qq.com/s/..."
+```
+
+### WeChat search (always zero-dep)
+
+```bash
 python3 scripts/sogou_wechat.py --keyword "AI Agent" --limit 5 --json
 ```
 
 ## 🖥️ Works with Claude Code / CC
 
-This is the key advantage over browser-based solutions. Since x-tweet-fetcher is **pure HTTP with zero dependencies**, it works perfectly in:
+Since x-tweet-fetcher has **zero mandatory dependencies**, it works perfectly in constrained environments:
 
-| Environment | Status | Notes |
-|-------------|:------:|-------|
-| **Claude Code (CC)** | ✅ | No browser to install |
-| **OpenClaw** | ✅ | Native skill integration |
-| **VPS (headless Linux)** | ✅ | No X11/display needed |
-| **Mac / Windows** | ✅ | Just Python |
-| **CI/CD pipelines** | ✅ | GitHub Actions, etc. |
-| **Docker containers** | ✅ | Minimal image |
-| **Termux (Android)** | ✅ | Tested on H618 box |
-
-Previously, tools like Camofox/Playwright required a full browser runtime — impossible in Claude Code, painful on VPS, and fragile everywhere. **No more.**
+| Environment | nitter mode | browser mode | Notes |
+|-------------|:----------:|:------------:|-------|
+| **Claude Code (CC)** | ✅ | ❌ | No browser runtime |
+| **OpenClaw** | ✅ | ✅ | Playwright built-in |
+| **VPS (headless Linux)** | ✅ | ✅* | *needs `pip install playwright` |
+| **Mac / Windows** | ✅ | ✅* | *needs `pip install playwright` |
+| **CI/CD pipelines** | ✅ | ⚠️ | Possible but heavy |
+| **Docker containers** | ✅ | ⚠️ | Needs Chromium in image |
+| **Termux (Android)** | ✅ | ❌ | No Chromium |
 
 ```bash
-# In Claude Code, just point to your Nitter instance:
+# In Claude Code (nitter mode, zero deps):
 export NITTER_URL=http://your-vps:8788
 python3 scripts/fetch_tweet.py --user YuLin807 --limit 10
+
+# In OpenClaw (auto mode, full features):
+python3 scripts/fetch_tweet.py --user YuLin807 --limit 10
+# → auto-detects Nitter, falls back to Playwright if needed
 ```
 
 ## 🔧 Self-hosted Nitter Setup
 
-> ⚠️ **Public Nitter instances are dead or unreliable** (as of March 2026, most are returning 403 or timing out). Self-hosting is the only reliable option.
+> ⚠️ **Public Nitter instances are dead or unreliable** (as of March 2026). Self-hosting is the only reliable option.
 
 ### Why you need this
 
-Twitter removed guest API access in 2023. Nitter now requires real account sessions. Public instances get rate-limited fast because thousands of users share a few accounts. **Your own instance = your own rate limits.**
+Twitter removed guest API access in 2023. Public Nitter instances get rate-limited because thousands of users share a few accounts. **Your own instance = your own rate limits.**
 
 ### 5-minute setup guide
 
@@ -117,7 +159,7 @@ Twitter removed guest API access in 2023. Nitter now requires real account sessi
 # Ubuntu/Debian
 sudo apt install -y redis-server libpcre3-dev libsass-dev
 
-# Install Nim (Nitter's language)
+# Install Nim
 curl https://nim-lang.org/choosenim/init.sh -sSf | sh
 export PATH=$HOME/.nimble/bin:$PATH
 ```
@@ -134,15 +176,11 @@ cp nitter.example.conf nitter.conf
 
 #### 3. Get X session cookies
 
-You need a real X account's cookies. Use a **secondary account** (not your main).
+Use a **secondary account** (not your main).
 
-1. Log into X in your browser
-2. Open DevTools → Application → Cookies → `x.com`
-3. Copy these two values:
-   - `auth_token`
-   - `ct0`
-
-4. Create `sessions.jsonl`:
+1. Log into X in browser → DevTools → Application → Cookies → `x.com`
+2. Copy `auth_token` and `ct0`
+3. Create `sessions.jsonl`:
 
 ```json
 {"name":"myaccount","auth_token":"YOUR_AUTH_TOKEN","ct0":"YOUR_CT0"}
@@ -150,77 +188,35 @@ You need a real X account's cookies. Use a **secondary account** (not your main)
 
 #### 4. Configure
 
-Edit `nitter.conf`:
-
 ```ini
 [Server]
-address = "127.0.0.1"  # Only local access (security!)
+address = "127.0.0.1"  # Local only!
 port = 8788
 
 [Config]
-hmacKey = "$(openssl rand -hex 32)"  # Generate a random key
+hmacKey = "$(openssl rand -hex 32)"
 
 [Tokens]
 tokenFile = "sessions.jsonl"
 ```
 
-#### 5. Run
+#### 5. Run & test
 
 ```bash
-# Start Redis
 sudo systemctl start redis-server
-
-# Start Nitter
 ./nitter
 
-# Or as a systemd service:
-sudo cp nitter.service /etc/systemd/system/
-sudo systemctl enable --now nitter
-```
-
-#### 6. Test
-
-```bash
-curl http://127.0.0.1:8788/YuLin807  # Should return HTML
+# Test
+curl http://127.0.0.1:8788/YuLin807
 export NITTER_URL=http://127.0.0.1:8788
-python3 scripts/nitter_client.py --search "test"  # Should return JSON
+python3 scripts/nitter_client.py --search "test"
 ```
 
 ### Security
 
-- **Bind to `127.0.0.1` only** — never expose Nitter to the public internet
-- **Use a secondary X account** — your session token gives full access
-- **Session tokens last ~1 year** — no need to refresh often
-
-## 🤔 Why Self-host?
-
-| | Public Nitter | Self-hosted | Browser (Playwright) |
-|--|:---:|:---:|:---:|
-| Reliability | ❌ Mostly dead | ✅ 100% uptime | ⚠️ Fragile |
-| Speed | Slow (shared) | ⚡ Fast | 🐌 Very slow |
-| Works in CC | ✅ (if alive) | ✅ Always | ❌ No |
-| Memory usage | — | ~30MB | ~500MB+ |
-| Rate limits | Shared with everyone | Only you | N/A |
-| Privacy | Third-party sees queries | Self-controlled | Self-controlled |
-| Setup time | 0 min | 5 min | 30 min+ |
-
-## ⏰ Cron Integration
-
-All monitoring scripts use exit codes for automation:
-
-| Exit Code | Meaning |
-|:---------:|---------|
-| `0` | No new content |
-| `1` | New content found |
-| `2` | Error |
-
-```bash
-# Check mentions every 30 min
-*/30 * * * * NITTER_URL=http://127.0.0.1:8788 python3 fetch_tweet.py --monitor @username || notify-send "New mentions!"
-
-# Discover tweets daily
-0 9 * * * python3 nitter_client.py --search "AI Agent" >> ~/discoveries.jsonl
-```
+- **Bind to `127.0.0.1` only** — never expose to public internet
+- **Use a secondary X account** — session token gives full access
+- **Session tokens last ~1 year**
 
 ## 📐 How It Works
 
@@ -230,52 +226,65 @@ All monitoring scripts use exit codes for automation:
                     │  (free)     │
                     └──────┬──────┘
                            │ JSON
-                    ┌──────┴──────┐       ┌──────────┐
- --user             │             │       │  Agent   │
- --replies   ──────▶│   Nitter    │──────▶│  (JSON)  │
- --monitor          │ (self-host) │       │          │
- --search           └─────────────┘       └──────────┘
-
-                    ┌─────────────┐
- sogou_wechat       │   Sogou     │  ← Direct HTTP, no API key
-                    │  (search)   │
-                    └─────────────┘
+              ┌────────────┴────────────┐
+              │    --backend auto       │
+              │  ┌───────┐  ┌────────┐  │       ┌──────────┐
+ --user       │  │Nitter │→→│Browser │  │       │  Agent   │
+ --replies    │  │(fast) │  │(full)  │  │──────▶│  (JSON)  │
+ --monitor    │  │ 0 dep │  │Playwrt │  │       │          │
+ --search     │  └───────┘  └────────┘  │       └──────────┘
+ --list       └─────────────────────────┘
+ --article
+              ┌─────────────┐
+ sogou_wechat │   Sogou     │  ← Direct HTTP, no API key
+ fetch_china  │  (search)   │
+              └─────────────┘
 ```
 
-- **Single tweets**: [FxTwitter](https://github.com/FxEmbed/FxEmbed) public API — always works, zero auth
-- **Timeline / Replies / Search / Mentions**: Self-hosted [Nitter](https://github.com/zedeus/nitter) — pure HTTP parsing
-- **WeChat articles**: Sogou search — direct HTTP, no browser
+- **Single tweets**: [FxTwitter](https://github.com/FxEmbed/FxEmbed) — always works, zero auth
+- **Timeline / Replies / Search / Mentions**: Self-hosted [Nitter](https://github.com/zedeus/nitter) or Playwright browser
+- **Lists / Articles**: Playwright browser (Nitter doesn't support these)
+- **WeChat / China platforms**: Sogou search + fetch_china.py
 
 ## 📦 Requirements
 
 ```
-Python 3.7+     (that's it)
+Python 3.7+     (that's it for nitter mode)
 ```
 
-No `pip install`. No `npm install`. No browser. No API keys for basic usage.
+| Mode | Extra requirement |
+|------|-----------------|
+| `--backend nitter` | Nothing (Python stdlib only) |
+| `--backend browser` | `pip install playwright` + `playwright install chromium` |
+| `--backend auto` | Uses whatever is available |
 
-| Feature | Extra requirement |
-|---------|-----------------|
-| Single tweet | Nothing |
-| Timeline / Replies / Search | Self-hosted Nitter |
-| Profile analysis | Nitter + any LLM API |
-| WeChat search | Nothing |
-| Growth tracking | Nothing |
+## ⏰ Cron Integration
+
+Exit codes for automation: `0`=nothing new, `1`=new content, `2`=error.
+
+```bash
+# Check mentions every 30 min
+*/30 * * * * NITTER_URL=http://127.0.0.1:8788 python3 fetch_tweet.py --monitor @username
+
+# Discover tweets daily
+0 9 * * * python3 nitter_client.py --search "AI Agent" >> ~/discoveries.jsonl
+```
 
 ## 🤝 Contributing
 
-Issues and PRs welcome! We focus on:
+Issues and PRs welcome! Core platforms:
 
-- **X/Twitter** — core platform, Nitter-based
-- **WeChat articles** — via Sogou search
+- **X/Twitter** — Nitter + Playwright backends
+- **WeChat articles** — Sogou search
 
-Other platforms (Weibo, Bilibili, etc.) are welcome as community PRs.
+Other platforms welcome as community PRs.
 
 ## 🙏 Acknowledgments
 
-- **[Nitter](https://github.com/zedeus/nitter)** by [zedeus](https://github.com/zedeus) (12.6k ⭐) — the self-hosted Twitter frontend that makes zero-browser tweet fetching possible
+- **[Nitter](https://github.com/zedeus/nitter)** by [zedeus](https://github.com/zedeus) (12.6k ⭐) — self-hosted Twitter frontend
 - **[FxTwitter](https://github.com/FxEmbed/FxEmbed)** — public API for single tweet data
-- **[OpenClaw](https://github.com/openclaw/openclaw)** — the AI agent framework this skill was built for
+- **[Playwright](https://github.com/microsoft/playwright)** — browser automation for full-feature coverage
+- **[OpenClaw](https://github.com/openclaw/openclaw)** — AI agent framework
 
 ## 📄 License
 
@@ -285,7 +294,7 @@ Other platforms (Weibo, Bilibili, etc.) are welcome as community PRs.
 
 <div align="center">
 
-*Built for AI agents. Works everywhere. No browser required.* 🦞
+*Three backends. Auto fallback. Works everywhere.* 🦞
 
 **[GitHub](https://github.com/ythx-101/x-tweet-fetcher)** · **[Issues](https://github.com/ythx-101/x-tweet-fetcher/issues)** · **[OpenClaw Q&A](https://github.com/ythx-101/openclaw-qa)**
 
