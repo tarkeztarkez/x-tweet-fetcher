@@ -697,7 +697,7 @@ def main():
             print(json.dumps(result, ensure_ascii=False, indent=indent))
             sys.exit(1)
 
-        replies = detail.get("replies", [])
+        replies = detail.get("replies_list", [])
         # Normalize replies format
         normalized = []
         for r in replies:
