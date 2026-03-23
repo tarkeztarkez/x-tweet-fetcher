@@ -20,7 +20,6 @@ Additional high-level helpers for Nitter:
 """
 
 import os
-import re
 import sys
 import time
 import secrets

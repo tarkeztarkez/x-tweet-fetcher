@@ -7,9 +7,11 @@ Used by fetch_tweet.py and fetch_china.py.
 """
 
 import json
+import re
 import secrets
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -84,10 +86,6 @@ def camofox_fetch_page(url: str, session_key: str, wait: float = 8, port: int = 
     snapshot = camofox_snapshot(tab_id, port)
     camofox_close_tab(tab_id, port)
     return snapshot
-
-
-import re
-import urllib.parse
 
 
 def camofox_search(query: str, num: int = 10, lang: str = "zh-CN", engine: str = "google", port: int = 9377) -> list:

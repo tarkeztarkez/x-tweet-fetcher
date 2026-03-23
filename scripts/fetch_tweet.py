@@ -266,19 +266,20 @@ def camofox_fetch_page(url: str, session_key: str, wait: float = 8, port: int = 
     return snapshot
 
 
-# --- Playwright override: prefer playwright_client if available ---
+# --- Browser backend priority: playwright > camofox ---
+# playwright_client wraps Playwright (OpenClaw built-in browser);
+# camofox_client wraps Camofox (Firefox-based). Both expose the same API.
+# If playwright is available, its functions silently override camofox's.
 try:
-    import os as _os, sys as _sys
-    _sd = _os.path.dirname(_os.path.abspath(__file__))
-    if _sd not in _sys.path:
-        _sys.path.insert(0, _sd)
+    _sd = os.path.dirname(os.path.abspath(__file__))
+    if _sd not in sys.path:
+        sys.path.insert(0, _sd)
     from playwright_client import (
         check_camofox, camofox_open_tab, camofox_snapshot,
         camofox_close_tab, camofox_fetch_page,
     )
-    _BROWSER_BACKEND = 'playwright'
 except ImportError:
-    _BROWSER_BACKEND = 'camofox'
+    pass  # camofox_client imports above remain in effect
 
 
 # ---------------------------------------------------------------------------
@@ -1781,15 +1782,13 @@ def _search_mentions(username: str, limit: int = 10, port: int = 9377) -> List[D
     """
     # 避免循环 import：在函数内部 import
     try:
-        import sys as _sys
-        import os as _os
-        # 将 scripts/ 目录加入路径，确保 camofox_client 可 import
-        scripts_dir = _os.path.dirname(_os.path.abspath(__file__))
-        if scripts_dir not in _sys.path:
-            _sys.path.insert(0, scripts_dir)
-        from camofox_client import camofox_search
+        # Prefer playwright backend (consistent with top-level override)
+        from playwright_client import camofox_search
     except ImportError:
-        raise ImportError("camofox_client not found — ensure scripts/ is in sys.path")
+        try:
+            from camofox_client import camofox_search
+        except ImportError:
+            raise ImportError("No browser backend available — install playwright or camofox")
 
     clean = username.lstrip("@")
     queries = [
@@ -2145,7 +2144,7 @@ def main():
             sys.exit(1)
         return
 
-    # ── Mode 4: Single tweet via FxTwitter (original, zero deps) ─────────
+    # ── Mode 5: Single tweet via FxTwitter (original, zero deps) ─────────
     result = fetch_tweet(args.url, timeout=args.timeout)
 
     if args.text_only:
@@ -2172,9 +2171,9 @@ def main():
 
 
 
-def supplement_views(tweets: List[Dict], max补充: int = 50) -> List[Dict]:
+def supplement_views(tweets: List[Dict], max_supplement: int = 50) -> List[Dict]:
     """用 FxTwitter API 补充浏览量数据"""
-    for i, tw in enumerate(tweets[:max补充]):
+    for i, tw in enumerate(tweets[:max_supplement]):
         if tw.get("views", 0) != 0:
             continue  # 已有浏览量，跳过
         # 从 author 构建 tweet URL

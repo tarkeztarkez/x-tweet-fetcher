@@ -94,13 +94,6 @@ def load_minimax_key() -> str:
 
 # ── 推文抓取 (Nitter + Nitter) ────────────────────────────────────────────────
 
-def _extract_cursor(snapshot: str, username: str) -> Optional[str]:
-    """从快照中提取下一页 cursor"""
-    import re
-    cursors = re.findall(r'cursor=([^\"&\s\)]+)', snapshot)
-    return cursors[0] if cursors else None
-
-
 def fetch_user_timeline(username: str, count: int = 20, verbose: bool = False, **kwargs) -> Tuple[List[Dict], Dict]:
     """
     抓取用户时间线推文（纯 HTTP，通过本地 Nitter 实例）

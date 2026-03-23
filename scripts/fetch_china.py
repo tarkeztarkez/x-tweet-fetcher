@@ -21,9 +21,6 @@ from abc import ABC, abstractmethod
 # Import shared Camofox client
 from camofox_client import (
     check_camofox,
-    camofox_open_tab,
-    camofox_snapshot,
-    camofox_close_tab,
     camofox_fetch_page,
 )
 
