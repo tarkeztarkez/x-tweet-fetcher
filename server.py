@@ -85,6 +85,32 @@ h1 { font-size: 1.15em; margin: 0 0 4px; color: #111; }
     font-size: 1.05em;
     line-height: 1.8;
 }
+.article-content h2 {
+    font-size: 1.35em;
+    margin: 1.5em 0 0.5em;
+    color: #111;
+    font-weight: 700;
+}
+.article-content h3 {
+    font-size: 1.15em;
+    margin: 1.2em 0 0.4em;
+    color: #222;
+    font-weight: 700;
+}
+.article-content ol, .article-content ul {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+.article-content li {
+    margin: 0.3em 0;
+    line-height: 1.7;
+}
+.article-content blockquote {
+    border-left: 3px solid #ccc;
+    padding-left: 12px;
+    color: #555;
+    margin: 1em 0;
+}
 .article-content img {
     display: block;
     max-width: 100%;
@@ -120,6 +146,108 @@ _INDEX_HTML = """<!DOCTYPE html>
 
 def _escape(text):
     return html.escape(str(text), quote=True)
+
+
+def _apply_inline_styles(text, inline_style_ranges):
+    """Apply Draft.js inline style ranges to escaped text, returning HTML."""
+    if not inline_style_ranges:
+        return _escape(text).replace("\n", "<br>")
+
+    # Sort ranges by offset
+    ranges = sorted(inline_style_ranges, key=lambda r: r.get("offset", 0))
+
+    # Build character-level style map
+    char_styles = [set() for _ in range(len(text))]
+    for r in ranges:
+        offset = r.get("offset", 0)
+        length = r.get("length", 0)
+        style = r.get("style", "").upper()
+        for i in range(offset, min(offset + length, len(text))):
+            char_styles[i].add(style)
+
+    # Build HTML segments
+    parts = []
+    current_styles = set()
+    segment_chars = []
+
+    for i, ch in enumerate(text):
+        if char_styles[i] != current_styles:
+            # Flush current segment
+            if segment_chars:
+                seg_text = _escape("".join(segment_chars))
+                if "BOLD" in current_styles:
+                    seg_text = f"<strong>{seg_text}</strong>"
+                if "ITALIC" in current_styles:
+                    seg_text = f"<em>{seg_text}</em>"
+                parts.append(seg_text)
+                segment_chars = []
+            current_styles = char_styles[i]
+        segment_chars.append(ch)
+
+    # Flush final segment
+    if segment_chars:
+        seg_text = _escape("".join(segment_chars))
+        if "BOLD" in current_styles:
+            seg_text = f"<strong>{seg_text}</strong>"
+        if "ITALIC" in current_styles:
+            seg_text = f"<em>{seg_text}</em>"
+        parts.append(seg_text)
+
+    return "".join(parts).replace("\n", "<br>")
+
+
+def _render_blocks_html(blocks):
+    """Convert Draft.js-style blocks to HTML with rich formatting.
+
+    Handles: header-two, header-three, unstyled, ordered-list-item,
+    unordered-list-item, atomic (images), blockquote.
+    """
+    html_parts = []
+    i = 0
+
+    while i < len(blocks):
+        block = blocks[i]
+        btype = block.get("type", "unstyled")
+        text = block.get("text", "")
+        styles = block.get("inlineStyleRanges", [])
+        images = block.get("images", [])
+
+        if btype.startswith("header-"):
+            level_map = {"header-one": "h1", "header-two": "h2", "header-three": "h3"}
+            tag = level_map.get(btype, "h2")
+            styled = _apply_inline_styles(text, styles)
+            html_parts.append(f"<{tag}>{styled}</{tag}>")
+            i += 1
+
+        elif btype == "atomic":
+            for img_url in images:
+                html_parts.append(f'<img src="{_escape(img_url)}" alt="" loading="lazy">')
+            i += 1
+
+        elif btype in ("ordered-list-item", "unordered-list-item"):
+            # Group consecutive list items of the same type
+            wrap_tag = "ol" if btype == "ordered-list-item" else "ul"
+            items = []
+            while i < len(blocks) and blocks[i].get("type") == btype:
+                li_text = blocks[i].get("text", "")
+                li_styles = blocks[i].get("inlineStyleRanges", [])
+                styled = _apply_inline_styles(li_text, li_styles)
+                items.append(f"<li>{styled}</li>")
+                i += 1
+            html_parts.append(f"<{wrap_tag}>{''.join(items)}</{wrap_tag}>")
+
+        elif btype == "blockquote":
+            styled = _apply_inline_styles(text, styles)
+            html_parts.append(f"<blockquote><p>{styled}</p></blockquote>")
+            i += 1
+
+        else:  # unstyled
+            if text.strip():
+                styled = _apply_inline_styles(text, styles)
+                html_parts.append(f"<p>{styled}</p>")
+            i += 1
+
+    return html_parts
 
 
 def _render_tweet_html(result, proxy_url=""):
@@ -192,24 +320,30 @@ def _render_tweet_html(result, proxy_url=""):
 
     # Main content
     if is_article and article:
-        # Article full text (contains inline images via markdown ![](url))
-        full_text = article.get("full_text", "")
-        if full_text:
+        blocks = article.get("blocks") or []
+        if blocks:
             body_parts.append('<div class="article-content">')
-            for block in full_text.split("\n\n"):
-                block = block.strip()
-                if not block:
-                    continue
-                # Markdown image: ![](url)
-                if block.startswith("![") and block.endswith(")"):
-                    img_m = re.match(r'!\[([^\]]*)\]\(([^)]+)\)', block)
-                    if img_m:
-                        alt = img_m.group(1)
-                        src = img_m.group(2)
-                        body_parts.append(f'<img src="{_escape(src)}" alt="{_escape(alt)}" loading="lazy">')
-                        continue
-                body_parts.append(f'<p>{_escape(block)}</p>')
+            body_parts.extend(_render_blocks_html(blocks))
             body_parts.append('</div>')
+        else:
+            # Fallback: plain article full text (contains inline images via markdown ![](url))
+            full_text = article.get("full_text", "")
+            if full_text:
+                body_parts.append('<div class="article-content">')
+                for block in full_text.split("\n\n"):
+                    block = block.strip()
+                    if not block:
+                        continue
+                    # Markdown image: ![](url)
+                    if block.startswith("![") and block.endswith(")"):
+                        img_m = re.match(r'!\[([^\]]*)\]\(([^)]+)\)', block)
+                        if img_m:
+                            alt = img_m.group(1)
+                            src = img_m.group(2)
+                            body_parts.append(f'<img src="{_escape(src)}" alt="{_escape(alt)}" loading="lazy">')
+                            continue
+                    body_parts.append(f'<p>{_escape(block)}</p>')
+                body_parts.append('</div>')
 
         wc = article.get("word_count", 0)
         if wc:

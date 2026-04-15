@@ -511,6 +511,159 @@ def camofox_fetch_page(url: str, session_key: str, wait: float = 8, port: int = 
 
 
 # ---------------------------------------------------------------------------
+# X Article rich content extraction (from Draft.js DOM)
+# ---------------------------------------------------------------------------
+
+_ARTICLE_BLOCKS_JS = """() => {
+    const editor = document.querySelector('[data-testid="longformRichTextComponent"]');
+    if (!editor) return null;
+
+    // Extract title
+    const titleEl = document.querySelector('[data-testid="twitter-article-title"]');
+    const title = titleEl ? titleEl.textContent.trim() : "";
+
+    // Extract author info
+    const nameEl = document.querySelector('[data-testid="User-Name"] a span span');
+    const authorName = nameEl ? nameEl.textContent.trim() : "";
+    const handleEl = document.querySelector('[data-testid="User-Name"] a[href] span');
+    const authorHandle = handleEl ? handleEl.textContent.trim() : "";
+
+    const blocks = [];
+
+    function extractStyledText(element) {
+        const segments = [];
+        for (const node of element.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent;
+                if (text) segments.push({text, bold: false, italic: false});
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const tag = node.tagName.toLowerCase();
+                const style = node.getAttribute("style") || "";
+                const isBold = style.includes("font-weight: bold") || tag === "strong" || tag === "b";
+                const isItalic = style.includes("font-style: italic") || tag === "em" || tag === "i";
+
+                if (isBold || isItalic) {
+                    segments.push({text: node.textContent, bold: isBold, italic: isItalic});
+                } else if (tag === "a") {
+                    // Links — just get text for now
+                    segments.push({text: node.textContent, bold: false, italic: false});
+                } else if (tag === "br") {
+                    segments.push({text: "\\n", bold: false, italic: false});
+                } else {
+                    // Nested element — recurse
+                    segments.push(...extractStyledText(node));
+                }
+            }
+        }
+        return segments;
+    }
+
+    // Process top-level block elements inside the editor
+    const topBlocks = editor.querySelectorAll(':scope > div > div > [data-block="true"], :scope > div > div > ol, :scope > div > div > ul, :scope > div > div > h2');
+
+    for (const el of topBlocks) {
+        const tag = el.tagName.toLowerCase();
+        const cls = el.className || "";
+
+        // Determine block type
+        let type = "unstyled";
+        if (tag === "h2" || cls.includes("longform-header-two")) type = "header-two";
+        else if (tag === "h3" || cls.includes("longform-header-three")) type = "header-three";
+        else if (cls.includes("longform-ordered-list-item")) type = "ordered-list-item";
+        else if (cls.includes("longform-unordered-list-item")) type = "unordered-list-item";
+        else if (tag === "section") type = "atomic";
+
+        // Extract text with styles
+        const innerDiv = el.querySelector('[data-offset-key]');
+        const textSource = innerDiv || el;
+        const text = textSource.textContent.trim();
+
+        // Build inline style ranges from styled spans
+        const inlineStyleRanges = [];
+        if (innerDiv || type === "unstyled" || type.startsWith("header")) {
+            let segments = [];
+            try {
+                segments = extractStyledText(textSource);
+            } catch(e) {}
+            let offset = 0;
+            const cleanText = [];
+            for (const seg of segments) {
+                const segText = seg.text;
+                cleanText.push(segText);
+                if (seg.bold) {
+                    inlineStyleRanges.push({style: "BOLD", offset, length: segText.length});
+                }
+                if (seg.italic) {
+                    inlineStyleRanges.push({style: "ITALIC", offset, length: segText.length});
+                }
+                offset += segText.length;
+            }
+        }
+
+        // Images (from section/atomic blocks)
+        const images = [];
+        if (type === "atomic") {
+            const imgs = el.querySelectorAll('img');
+            for (const img of imgs) {
+                const src = img.getAttribute("src") || "";
+                if (src && src.includes("twimg")) {
+                    images.push(src.replace("?format=", "?format=").split("?name=")[0] + "?name=medium");
+                }
+            }
+        }
+
+        blocks.push({type, text, inlineStyleRanges, images});
+    }
+
+    return {title, authorName, authorHandle, blocks};
+}"""
+
+
+def playwright_fetch_article_blocks(
+    article_url: str,
+    wait: float = 10,
+) -> Dict[str, Any]:
+    """Fetch rich article content from X.com via Playwright DOM extraction.
+
+    Opens the article URL directly (not via Nitter), extracts Draft.js block
+    structure with formatting (bold, italic, headings, lists, images).
+
+    Returns dict with: title, authorName, authorHandle, blocks
+    """
+    pw = browser = None
+    result: Dict[str, Any] = {"url": article_url, "blocks": []}
+
+    try:
+        pw, browser = _launch_browser()
+        ctx = _new_context(browser, lang="en-US")
+        page = ctx.new_page()
+        _safe_goto(page, article_url, timeout=30000)
+        time.sleep(wait)
+
+        data = page.evaluate(_ARTICLE_BLOCKS_JS)
+        if data:
+            result["title"] = data.get("title", "")
+            result["author"] = data.get("authorName", "")
+            result["author_handle"] = data.get("authorHandle", "")
+            result["blocks"] = data.get("blocks", [])
+
+        ctx.close()
+    except Exception as e:
+        print(f"[playwright_client] article error ({article_url[:60]}): {e}", file=sys.stderr)
+    finally:
+        try:
+            browser and browser.close()
+        except Exception:
+            pass
+        try:
+            pw and pw.stop()
+        except Exception:
+            pass
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Search (Google / DuckDuckGo)
 # ---------------------------------------------------------------------------
 

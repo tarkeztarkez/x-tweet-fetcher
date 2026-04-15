@@ -500,6 +500,7 @@ def fetch_tweet(url: str, timeout: int = 30) -> Dict[str, Any]:
                     article_data["full_text"] = full_text
                     article_data["word_count"] = len(full_text.split())
                     article_data["char_count"] = len(full_text)
+                    article_data["blocks"] = blocks
 
                 # article_images still collected the same way for compatibility
                 article_images = []
@@ -1580,6 +1581,33 @@ def fetch_article(
         "article_id": article_id,
         "url": article_url,
     }
+
+    # Try Playwright rich DOM extraction first (returns blocks with formatting)
+    try:
+        from playwright_client import playwright_fetch_article_blocks
+        print(t("opening_article_via_camofox", url=article_url), file=sys.stderr)
+        rich = playwright_fetch_article_blocks(article_url, wait=10)
+        if rich and rich.get("blocks"):
+            result["title"] = rich.get("title", "")
+            result["author"] = rich.get("author", "")
+            result["author_handle"] = rich.get("author_handle", "")
+            result["blocks"] = rich["blocks"]
+            # Build plain text fallback from blocks
+            text_parts = []
+            for b in rich["blocks"]:
+                if b.get("type") == "atomic":
+                    continue
+                if b.get("text"):
+                    text_parts.append(b["text"])
+            result["content"] = "\n\n".join(text_parts)
+            result["word_count"] = len(result["content"].split())
+            result["char_count"] = len(result["content"])
+            result["is_partial"] = result["char_count"] < 100
+            if result["is_partial"]:
+                result["warning"] = t("article_login_note")
+            return result
+    except Exception:
+        pass  # Fall through to camofox/snapshot path
 
     if not check_camofox(camofox_port):
         result["error"] = t("err_camofox_not_running_article", port=camofox_port)
