@@ -146,9 +146,9 @@ def _render_tweet_html(result, proxy_url=""):
 
     # Title
     if is_article and article and article.get("title"):
-        title = f"{article['title']} — @{screen_name} on X"
+        title = article["title"]
     else:
-        title = f"@{screen_name} on X"
+        title = f"@{screen_name}"
 
     # Description (first 200 chars of text)
     desc = text[:200].replace("\n", " ").strip()
@@ -169,8 +169,7 @@ def _render_tweet_html(result, proxy_url=""):
     og_image_tags = ""
     if og_image:
         og_image_tags = (
-            f'<meta property="og:image" content="{_escape(og_image)}" />\n'
-            f'<meta name="twitter:image" content="{_escape(og_image)}" />'
+            f'<meta property="og:image" content="{_escape(og_image)}" />'
         )
 
     # --- Build <body> content ---
@@ -185,8 +184,8 @@ def _render_tweet_html(result, proxy_url=""):
 
     body_parts.append(
         f'<div class="author-line">'
-        f'<a href="https://x.com/{_escape(screen_name)}">@{_escape(screen_name)}</a>'
-        f'{(" · " + _escape(author)) if author != screen_name else ""}'
+        f'<strong>{_escape(author)}</strong>'
+        f'{(" · @" + _escape(screen_name)) if screen_name else ""}'
         f' &middot; {_escape(created_at)}'
         f'</div>'
     )
@@ -297,10 +296,6 @@ def _render_tweet_html(result, proxy_url=""):
 <meta property="og:url" content="{page_url}" />
 <meta property="article:author" content="@{_escape(screen_name)}" />
 <meta property="article:published_time" content="{_escape(created_at)}" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="{_escape(title)}" />
-<meta name="twitter:description" content="{_escape(desc)}" />
-<meta name="twitter:creator" content="@{_escape(screen_name)}" />
 {og_image_tags}
 <link rel="canonical" href="{page_url}" />
 <style>{_STYLES}</style>
@@ -309,7 +304,6 @@ def _render_tweet_html(result, proxy_url=""):
 <article>
 {body_html}
 </article>
-<footer class="site">tweet-proxy &middot; source: <a href="{_escape(original_url)}">{_escape(original_url)}</a></footer>
 </body>
 </html>"""
     return page, 200
