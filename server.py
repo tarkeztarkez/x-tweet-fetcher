@@ -196,7 +196,7 @@ def _apply_inline_styles(text, inline_style_ranges):
     return "".join(parts).replace("\n", "<br>")
 
 
-def _render_blocks_html(blocks):
+def _render_blocks_html(blocks, fallback_images=None):
     """Convert Draft.js-style blocks to HTML with rich formatting.
 
     Handles: header-two, header-three, unstyled, ordered-list-item,
@@ -204,6 +204,8 @@ def _render_blocks_html(blocks):
     """
     html_parts = []
     i = 0
+    fallback_images = list(fallback_images or [])
+    fallback_image_idx = 0
 
     while i < len(blocks):
         block = blocks[i]
@@ -220,7 +222,11 @@ def _render_blocks_html(blocks):
             i += 1
 
         elif btype == "atomic":
-            for img_url in images:
+            atomic_images = images
+            if not atomic_images and fallback_image_idx < len(fallback_images):
+                atomic_images = [fallback_images[fallback_image_idx]]
+                fallback_image_idx += 1
+            for img_url in atomic_images:
                 html_parts.append(f'<img src="{_escape(img_url)}" alt="" loading="lazy">')
             i += 1
 
@@ -322,8 +328,13 @@ def _render_tweet_html(result, proxy_url=""):
     if is_article and article:
         blocks = article.get("blocks") or []
         if blocks:
+            article_images = [
+                img.get("url", "")
+                for img in article.get("images", [])
+                if img.get("type") == "image" and img.get("url")
+            ]
             body_parts.append('<div class="article-content">')
-            body_parts.extend(_render_blocks_html(blocks))
+            body_parts.extend(_render_blocks_html(blocks, fallback_images=article_images))
             body_parts.append('</div>')
         else:
             # Fallback: plain article full text (contains inline images via markdown ![](url))
