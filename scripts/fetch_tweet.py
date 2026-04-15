@@ -1406,7 +1406,9 @@ def parse_article_id(input_str: str) -> Optional[str]:
     Accepts:
       - Pure numeric ID:           "2011779830157557760"
       - Article URL:               "https://x.com/i/article/2011779830157557760"
+      - Article URL:               "https://x.com/garrytan/article/2011779830157557760"
       - Article URL (no scheme):   "x.com/i/article/2011779830157557760"
+      - Article URL (no scheme):   "x.com/garrytan/article/2011779830157557760"
       - Tweet URL whose text links to an article (pass the ID directly in that case)
 
     Returns the article ID string, or None if unparseable.
@@ -1419,6 +1421,11 @@ def parse_article_id(input_str: str) -> Optional[str]:
 
     # URL containing /i/article/<id>
     m = re.search(r'/i/article/(\d{10,25})', input_str)
+    if m:
+        return m.group(1)
+
+    # URL containing /<username>/article/<id>
+    m = re.search(r'/(?:[a-zA-Z0-9_]{1,15})/article/(\d{10,25})', input_str)
     if m:
         return m.group(1)
 
@@ -1559,6 +1566,7 @@ def fetch_article(
 
     ``input_str`` can be:
       - A full article URL:  https://x.com/i/article/2011779830157557760
+      - A full article URL:  https://x.com/garrytan/article/2011779830157557760
       - A bare article ID:   2011779830157557760
 
     Note: X Articles require login to read the full text. Without login,
@@ -1947,7 +1955,7 @@ def main():
     parser.add_argument("--search", "-s", metavar="QUERY", help="Search tweets (via Nitter)")
     parser.add_argument("--user-info", metavar="USERNAME", help="Get user profile info (via FxTwitter)")
     parser.add_argument("--article", "-a", metavar="URL_or_ID",
-                        help="X Article URL (https://x.com/i/article/ID) or bare article ID")
+                        help="X Article URL (https://x.com/i/article/ID or https://x.com/USER/article/ID) or bare article ID")
     parser.add_argument("--monitor", "-m", metavar="@USERNAME",
                         help="Monitor X mentions for a username")
     parser.add_argument("--list", "-l", metavar="LIST_URL_OR_ID",
