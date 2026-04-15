@@ -26,6 +26,8 @@ if SCRIPTS_DIR not in sys.path:
 
 from fetch_tweet import fetch_tweet
 
+SITE_URL = os.environ.get("SITE_URL", "http://localhost:8080").rstrip("/")
+
 
 # ---------------------------------------------------------------------------
 # HTML Template
@@ -120,7 +122,7 @@ def _escape(text):
     return html.escape(str(text), quote=True)
 
 
-def _render_tweet_html(result):
+def _render_tweet_html(result, proxy_url=""):
     """Convert fetch_tweet() JSON result to Instapaper-friendly HTML."""
     tweet = result.get("tweet", {})
     if not tweet:
@@ -285,6 +287,8 @@ def _render_tweet_html(result):
 
     body_html = "\n".join(body_parts)
 
+    page_url = _escape(proxy_url) if proxy_url else _escape(original_url)
+
     # Assemble full page
     page = f"""<!DOCTYPE html>
 <html lang="en" prefix="og: https://ogp.me/ns# article: https://ogp.me/ns/article#">
@@ -297,7 +301,7 @@ def _render_tweet_html(result):
 <meta property="og:title" content="{_escape(title)}" />
 <meta property="og:description" content="{_escape(desc)}" />
 <meta property="og:type" content="article" />
-<meta property="og:url" content="{_escape(original_url)}" />
+<meta property="og:url" content="{page_url}" />
 <meta property="article:author" content="@{_escape(screen_name)}" />
 <meta property="article:published_time" content="{_escape(created_at)}" />
 <meta name="twitter:card" content="summary_large_image" />
@@ -305,7 +309,7 @@ def _render_tweet_html(result):
 <meta name="twitter:description" content="{_escape(desc)}" />
 <meta name="twitter:creator" content="@{_escape(screen_name)}" />
 {og_image_tags}
-<link rel="canonical" href="{_escape(original_url)}" />
+<link rel="canonical" href="{page_url}" />
 <style>{_STYLES}</style>
 </head>
 <body>
@@ -366,7 +370,8 @@ class TweetHandler(BaseHTTPRequestHandler):
             )
             return
 
-        page_html, status_code = _render_tweet_html(result)
+        proxy_url = f"{SITE_URL}{path}"
+        page_html, status_code = _render_tweet_html(result, proxy_url=proxy_url)
         self._send_html(page_html, status_code)
 
     def _send_html(self, content, status=200):

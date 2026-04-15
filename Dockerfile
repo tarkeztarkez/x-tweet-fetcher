@@ -18,6 +18,9 @@ COPY server.py /app/server.py
 # Expose port
 EXPOSE 8080
 
+# Override with your domain: docker run -e SITE_URL=http://tweet.marcinszyda.com ...
+ENV SITE_URL=http://localhost:8080
+
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
