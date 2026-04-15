@@ -458,8 +458,12 @@ def _render_tweet_html(result, proxy_url=""):
 # HTTP Handler
 # ---------------------------------------------------------------------------
 
-# Route pattern: /<username>/status/<tweet_id>
+# Route patterns:
+# - /<username>/status/<tweet_id>
+# - /<username>/article/<article_id>
+# - /i/article/<article_id>
 _TWEET_ROUTE = re.compile(r'^/([a-zA-Z0-9_]{1,15})/status/(\d+)/?$')
+_ARTICLE_ROUTE = re.compile(r'^/(?:([a-zA-Z0-9_]{1,15})/)?article/(\d+)/?$')
 
 
 class TweetHandler(BaseHTTPRequestHandler):
@@ -479,16 +483,31 @@ class TweetHandler(BaseHTTPRequestHandler):
 
         # Tweet route
         m = _TWEET_ROUTE.match(path)
-        if not m:
-            self._send_html(
-                _ERROR_HTML.format(styles=_STYLES, message="Invalid URL. Use /&lt;username&gt;/status/&lt;tweet_id&gt;"),
-                400,
-            )
-            return
-
-        username = m.group(1)
-        tweet_id = m.group(2)
-        tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+        if m:
+            username = m.group(1)
+            tweet_id = m.group(2)
+            tweet_url = f"https://x.com/{username}/status/{tweet_id}"
+        else:
+            # Article route
+            m = _ARTICLE_ROUTE.match(path)
+            if m:
+                username = m.group(1)
+                article_id = m.group(2)
+                if not username:
+                    self._send_html(
+                        _ERROR_HTML.format(styles=_STYLES, message="Invalid article URL. Use /&lt;username&gt;/article/&lt;article_id&gt;"),
+                        400,
+                    )
+                    return
+                # X article slugs use the same numeric ID as the underlying post.
+                # FxTwitter expects the status URL, so normalize article routes here.
+                tweet_url = f"https://x.com/{username}/status/{article_id}"
+            else:
+                self._send_html(
+                    _ERROR_HTML.format(styles=_STYLES, message="Invalid URL. Use /&lt;username&gt;/status/&lt;tweet_id&gt; or /&lt;username&gt;/article/&lt;article_id&gt;"),
+                    400,
+                )
+                return
 
         self.log_message(f"Fetching: {tweet_url}")
 
