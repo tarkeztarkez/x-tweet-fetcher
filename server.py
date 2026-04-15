@@ -193,14 +193,7 @@ def _render_tweet_html(result, proxy_url=""):
 
     # Main content
     if is_article and article:
-        # Article images (cover + inline)
-        if article.get("images"):
-            for img in article["images"]:
-                url = img.get("url", "")
-                if url:
-                    body_parts.append(f'<img src="{_escape(url)}" alt="" loading="lazy">')
-
-        # Article full text (may contain markdown-style images)
+        # Article full text (contains inline images via markdown ![](url))
         full_text = article.get("full_text", "")
         if full_text:
             body_parts.append('<div class="article-content">')
